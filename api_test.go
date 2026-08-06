@@ -775,6 +775,73 @@ func TestProcessImageJSONPayload(t *testing.T) {
 	}
 }
 
+func TestOpenRouterEmptyResponse(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(nil)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	req := httptest.NewRequest("POST", "/api/v1/process",
+		strings.NewReader(`{"image":"data:image/png;base64,`+base64.StdEncoding.EncodeToString(miniPNG)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusBadGateway, rr.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "empty response") {
+		t.Errorf("error = %q, want a clear empty-response message", resp.Error)
+	}
+	if strings.Contains(resp.Error, "unexpected end of JSON input") {
+		t.Errorf("error = %q, should not leak JSON parse internals", resp.Error)
+	}
+}
+
+func TestOpenRouterOversizedResponse(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`,
+			strings.Repeat("A", maxOpenRouterBytes))
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	req := httptest.NewRequest("POST", "/api/v1/process",
+		strings.NewReader(`{"image":"data:image/png;base64,`+base64.StdEncoding.EncodeToString(miniPNG)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusBadGateway, rr.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "size limit") {
+		t.Errorf("error = %q, want a size-limit message", resp.Error)
+	}
+}
+
 func TestGetImageRejectsPathTraversal(t *testing.T) {
 	a := newAPI(false, docsFS)
 	a.outputDir = t.TempDir()

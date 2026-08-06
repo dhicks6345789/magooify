@@ -28,6 +28,7 @@ const (
 	defaultOutputDir     = "processed"
 	fallbackPrompt       = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
 	maxImageUploadBytes  = 25 << 20
+	maxOpenRouterBytes   = 25 << 20
 )
 
 // processPrompt returns the image-processing instructions sent to the model.
@@ -451,12 +452,18 @@ func (a *api) processWithOpenRouter(img []byte, contentType string) ([]byte, err
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxOpenRouterBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read OpenRouter response: %w", err)
 	}
+	if len(respBody) > maxOpenRouterBytes {
+		return nil, errors.New("OpenRouter response exceeded the 25 MB size limit")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("OpenRouter returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	if len(respBody) == 0 {
+		return nil, errors.New("OpenRouter returned an empty response (HTTP 200); the model may have failed to produce an image. Please try again")
 	}
 
 	return extractImageFromResponse(respBody)
@@ -480,7 +487,7 @@ func extractImageFromResponse(respBody []byte) ([]byte, error) {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &chat); err != nil {
-		return nil, fmt.Errorf("Failed to parse OpenRouter response: %w", err)
+		return nil, fmt.Errorf("OpenRouter returned a response that could not be parsed (%v); the model may have failed or returned an unexpected format. Please try again", err)
 	}
 	if len(chat.Choices) == 0 {
 		return nil, errors.New("OpenRouter returned no choices")
