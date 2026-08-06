@@ -30,10 +30,17 @@ const (
 )
 
 // processPrompt returns the image-processing instructions sent to the model.
-// The text is taken from the embedded PROMPT.md file (see PROMPT.md at the
-// repository root), falling back to a built-in prompt if the file is missing
-// or empty.
-func processPrompt() string {
+// If a prompt file was supplied with -prompt-file, its text is read from disk;
+// otherwise the text embedded from PROMPT.md is used. If neither is available
+// (or is empty) a built-in prompt is used.
+func (a *api) processPrompt() string {
+	if a.promptFile != "" {
+		if data, err := os.ReadFile(a.promptFile); err == nil {
+			if p := strings.TrimSpace(string(data)); p != "" {
+				return p
+			}
+		}
+	}
 	if p := strings.TrimSpace(promptMD); p != "" {
 		return p
 	}
@@ -144,6 +151,7 @@ type api struct {
 	openRouterURL  string
 	model          string
 	outputDir      string
+	promptFile     string
 	httpClient     *http.Client
 }
 
@@ -423,7 +431,7 @@ func (a *api) processWithOpenRouter(img []byte, contentType, filename string) (s
 			map[string]any{
 				"role": "user",
 				"content": []any{
-					map[string]any{"type": "text", "text": processPrompt()},
+					map[string]any{"type": "text", "text": a.processPrompt()},
 					map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURL}},
 				},
 			},

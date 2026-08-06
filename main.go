@@ -69,6 +69,7 @@ func main() {
 	openRouterKey := flag.String("openrouter-key", getEnv("OPENROUTER_API_KEY", ""), "OpenRouter API key used to process captured images")
 	outputDir := flag.String("output-dir", getEnv("OUTPUT_DIR", defaultOutputDir), "Directory where processed images and their descriptions are stored")
 	model := flag.String("model", getEnv("OPENROUTER_MODEL", defaultModel), "OpenRouter model used to process images")
+	promptFile := flag.String("prompt-file", getEnv("PROMPT_FILE", ""), "Path to a file whose text is sent to the model with each image, instead of the embedded PROMPT.md")
 	flag.Parse()
 
 	// Offline documentation generation (used by the build script to produce docs/api.html).
@@ -98,6 +99,7 @@ func main() {
 	a.openRouterKey = *openRouterKey
 	a.outputDir = *outputDir
 	a.model = *model
+	a.promptFile = *promptFile
 
 	handler := buildHandler(a, basePaths)
 
@@ -114,6 +116,11 @@ func main() {
 		log.Printf("OpenRouter: NOT configured (use -openrouter-key)")
 	}
 	log.Printf("Output dir: %s", a.outputDir)
+	if a.promptFile != "" {
+		log.Printf("Prompt file: %s", a.promptFile)
+	} else {
+		log.Printf("Prompt file: embedded PROMPT.md")
+	}
 	for _, bp := range basePaths {
 		log.Printf("Base path : %s", bp)
 		log.Printf("UI        : http://%s%s/", addr, bp)

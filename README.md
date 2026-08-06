@@ -36,17 +36,26 @@ Optional flags:
 | `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the image endpoint reports that OpenRouter is not configured. |
 | `-output-dir` | `processed` | Folder where processed images and their text descriptions are stored. |
 | `-model` | `google/gemini-3.1-flash-lite-image` | OpenRouter model used to process the images (any vision-capable model). |
+| `-prompt-file` | (unset) | Path to a file whose text is sent to the model with each image, instead of the embedded `PROMPT.md`. |
 | `-port` | `8080` | Port for the local server. |
 | `-mode` | `desktop` | `desktop` or `server`. |
 | `-host` | (derived) | Host IP to bind to (`127.0.0.1` in desktop mode, `0.0.0.0` in server mode). |
 | `-base-path` | (unset) | Reverse-proxy sub-path prefix, e.g. `/magooify`. |
 | `-no-browser` | `false` | Do not auto-launch the browser in desktop mode. |
 
-The environment variables `OPENROUTER_API_KEY`, `OUTPUT_DIR`, `OPENROUTER_MODEL`, `PORT`, `APP_MODE`, `HOST` and `BASE_PATH` can be used instead of the equivalent flags.
+The environment variables `OPENROUTER_API_KEY`, `OUTPUT_DIR`, `OPENROUTER_MODEL`, `PROMPT_FILE`, `PORT`, `APP_MODE`, `HOST` and `BASE_PATH` can be used instead of the equivalent flags.
 
 ## Customising the Processing Instructions
 
 The instructions sent to the AI model alongside each image come from the [`PROMPT.md`](PROMPT.md) file at the repository root. The file's text is embedded into the executable at build time, so you can change what the model does with each image simply by editing that file and rebuilding. If `PROMPT.md` is empty or missing the application falls back to a built-in default prompt.
+
+To use a different prompt without rebuilding, point the `-prompt-file` option at your own text file:
+
+```
+./magooify -openrouter-key=sk-or-v1-... -prompt-file=~/my-instructions.txt
+```
+
+The file's text is read from disk on each use; if it can't be read or is empty, the embedded `PROMPT.md` text (or the built-in default) is used instead.
 
 ### Server
 

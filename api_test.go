@@ -537,12 +537,35 @@ func TestParseBasePaths(t *testing.T) {
 }
 
 func TestProcessPromptFromFile(t *testing.T) {
-	got := processPrompt()
+	a := newAPI(false, docsFS)
+	got := a.processPrompt()
 	if got == "" {
 		t.Fatal("processPrompt() returned an empty prompt")
 	}
 	if !strings.Contains(got, "Clean this scanned image") {
 		t.Errorf("processPrompt() does not contain the PROMPT.md text: %q", got)
+	}
+}
+
+func TestProcessPromptFromCustomFile(t *testing.T) {
+	promptFile := filepath.Join(t.TempDir(), "my-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("Custom instructions here."), 0o644); err != nil {
+		t.Fatalf("failed to write prompt file: %v", err)
+	}
+
+	a := newAPI(false, docsFS)
+	a.promptFile = promptFile
+	if got := a.processPrompt(); got != "Custom instructions here." {
+		t.Errorf("processPrompt() = %q, want custom prompt text", got)
+	}
+}
+
+func TestProcessPromptFallsBackWhenCustomFileMissing(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.promptFile = filepath.Join(t.TempDir(), "does-not-exist.txt")
+	got := a.processPrompt()
+	if got == "" || !strings.Contains(got, "Clean this scanned image") {
+		t.Errorf("processPrompt() should fall back to PROMPT.md text, got %q", got)
 	}
 }
 
