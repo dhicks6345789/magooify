@@ -165,6 +165,29 @@
                 }
             }
         },
+        "/api/v1/models": {
+            "get": {
+                "description": "Lists OpenRouter models that accept image input with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.",
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "List Image-Capable Models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ModelsResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/process": {
             "post": {
                 "description": "Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the processed version of the image in the configured output directory.",
@@ -352,6 +375,66 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/Item"
+                    }
+                }
+            }
+        },
+        "ModelInfo": {
+            "type": "object",
+            "properties": {
+                "completion_per_million": {
+                    "type": "number",
+                    "example": 1.5
+                },
+                "estimated_image_cost": {
+                    "type": "number",
+                    "example": 0.0304
+                },
+                "id": {
+                    "type": "string",
+                    "example": "google/gemini-3.1-flash-lite-image"
+                },
+                "input_image_cost": {
+                    "type": "number",
+                    "example": 0.0004
+                },
+                "input_image_cost_known": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"
+                },
+                "output_image_cost": {
+                    "type": "number",
+                    "example": 0.03
+                },
+                "output_image_cost_known": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "outputs_images": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "prompt_per_million": {
+                    "type": "number",
+                    "example": 0.25
+                },
+                "request_cost": {
+                    "type": "number",
+                    "example": 0
+                }
+            }
+        },
+        "ModelsResponse": {
+            "type": "object",
+            "properties": {
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ModelInfo"
                     }
                 }
             }

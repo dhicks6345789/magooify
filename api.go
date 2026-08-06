@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
@@ -26,6 +27,8 @@ import (
 const (
 	openRouterDefaultURL = "https://openrouter.ai/api/v1/chat/completions"
 	openRouterCreditsURL = "https://openrouter.ai/api/v1/credits"
+	openRouterModelsURL  = "https://openrouter.ai/api/v1/models"
+	modelsCacheTTL       = 30 * time.Minute
 	defaultModel         = "google/gemini-3.1-flash-lite-image"
 	defaultOutputDir     = "processed"
 	fallbackPrompt       = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
@@ -135,6 +138,33 @@ type CreditsResponse struct {
 	SessionCost      float64 `json:"session_cost"`
 }
 
+// ModelInfo describes an OpenRouter model that accepts image input and the cost
+// of processing a single image with it. OpenRouter publishes exact per-image
+// prices for some models (via pricing.image for image input and
+// pricing.image_output for a generated image); where no such price exists the
+// cost is estimated from the per-token rates. InputImageCostKnown and
+// OutputImageCostKnown report which of the two costs is an exact published
+// price rather than an estimate. EstimatedImageCost is the sum used for a
+// single image-in/image-out processing run.
+type ModelInfo struct {
+	ID                   string  `json:"id" example:"google/gemini-3.1-flash-lite-image"`
+	Name                 string  `json:"name" example:"Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"`
+	OutputsImages        bool    `json:"outputs_images" example:"true"`
+	InputImageCost       float64 `json:"input_image_cost" example:"0.0004"`
+	InputImageCostKnown  bool    `json:"input_image_cost_known" example:"false"`
+	OutputImageCost      float64 `json:"output_image_cost" example:"0.03"`
+	OutputImageCostKnown bool    `json:"output_image_cost_known" example:"true"`
+	PromptPerMillion     float64 `json:"prompt_per_million" example:"0.25"`
+	CompletionPerMillion float64 `json:"completion_per_million" example:"1.5"`
+	RequestCost          float64 `json:"request_cost" example:"0"`
+	EstimatedImageCost   float64 `json:"estimated_image_cost" example:"0.0304"`
+}
+
+// ModelsResponse is the payload returned when listing image-capable models.
+type ModelsResponse struct {
+	Models []ModelInfo `json:"models"`
+}
+
 // StoredImage describes a processed image stored on the file system.
 type StoredImage struct {
 	Filename string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
@@ -171,11 +201,14 @@ type api struct {
 	managementKey  string
 	openRouterURL  string
 	creditsURL     string
+	modelsURL      string
 	model          string
 	outputDir      string
 	promptFile     string
 	httpClient     *http.Client
 	sessionCost    float64
+	modelsCache    []ModelInfo
+	modelsCachedAt time.Time
 }
 
 // @title Magooify API
@@ -197,6 +230,7 @@ func newAPI(isServerMode bool, docsFS fs.FS) *api {
 		docsFS:        docsFS,
 		openRouterURL: openRouterDefaultURL,
 		creditsURL:    openRouterCreditsURL,
+		modelsURL:     openRouterModelsURL,
 		model:         defaultModel,
 		outputDir:     defaultOutputDir,
 		httpClient:    &http.Client{Timeout: 120 * time.Second},
@@ -291,6 +325,7 @@ func (a *api) info(w http.ResponseWriter, r *http.Request) {
 		"os":         runtime.GOOS,
 		"arch":       runtime.GOARCH,
 		"uptime":     time.Since(a.startTime).Truncate(time.Second).String(),
+		"model":      a.model,
 	})
 }
 
@@ -360,6 +395,187 @@ func (a *api) fetchCredits() (remaining, total, used float64, ok bool) {
 	total = body.Data.TotalCredits
 	remaining = total - used
 	return remaining, total, used, true
+}
+
+// imageInputTokenEstimate and imageOutputTokenEstimate are the token counts
+// used to estimate a per-image processing cost for models that bill by the
+// token instead of publishing a fixed per-image price. A typical 1024x1024
+// image is commonly estimated at around 1,600 input tokens, and a generated
+// image at roughly 1,290 output tokens. These are estimates: providers bill
+// images differently, so exact per-image prices are used whenever OpenRouter
+// publishes them.
+const (
+	imageInputTokenEstimate  = 1600.0
+	imageOutputTokenEstimate = 1290.0
+)
+
+// openRouterPricing mirrors the pricing fields OpenRouter publishes for a
+// model. All values are USD strings. Fields such as "overrides" are ignored.
+type openRouterPricing struct {
+	Prompt      string `json:"prompt"`
+	Completion  string `json:"completion"`
+	Request     string `json:"request"`
+	Image       string `json:"image"`
+	ImageOutput string `json:"image_output"`
+}
+
+// openRouterModel mirrors the subset of OpenRouter's model object consumed by
+// fetchModels.
+type openRouterModel struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Architecture struct {
+		Input  []string `json:"input_modalities"`
+		Output []string `json:"output_modalities"`
+	} `json:"architecture"`
+	Pricing openRouterPricing `json:"pricing"`
+}
+
+// models returns the OpenRouter models that accept image input, together with
+// the estimated cost of processing a single image with each one, cheapest
+// first.
+// @Summary List Image-Capable Models
+// @Description Lists OpenRouter models that accept image input with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.
+// @Produce json
+// @Success 200 {object} ModelsResponse
+// @Failure 502 {object} ErrorResponse
+// @Router /api/v1/models [get]
+func (a *api) models(w http.ResponseWriter, r *http.Request) {
+	models, err := a.fetchModels()
+	if err != nil {
+		a.jsonError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ModelsResponse{Models: models})
+}
+
+// fetchModels returns the list of OpenRouter models that accept image input,
+// cheapest first. The result is cached briefly so the UI can reload without
+// hammering OpenRouter; the request is public and does not require a key, but
+// the configured key is sent when present so rate limits apply to the account.
+func (a *api) fetchModels() ([]ModelInfo, error) {
+	a.mu.RLock()
+	if a.modelsCache != nil && time.Since(a.modelsCachedAt) < modelsCacheTTL {
+		models := a.modelsCache
+		a.mu.RUnlock()
+		return models, nil
+	}
+	a.mu.RUnlock()
+
+	req, err := http.NewRequest(http.MethodGet, a.modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to build OpenRouter models request: %w", err)
+	}
+	if a.openRouterKey != "" {
+		req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
+	}
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to fetch models from OpenRouter: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenRouter models request returned status %d", resp.StatusCode)
+	}
+
+	var body struct {
+		Data []openRouterModel `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOpenRouterBytes)).Decode(&body); err != nil {
+		return nil, fmt.Errorf("Failed to parse OpenRouter models response: %w", err)
+	}
+
+	models := buildModelList(body.Data)
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].EstimatedImageCost != models[j].EstimatedImageCost {
+			return models[i].EstimatedImageCost < models[j].EstimatedImageCost
+		}
+		return models[i].ID < models[j].ID
+	})
+
+	a.mu.Lock()
+	a.modelsCache = models
+	a.modelsCachedAt = time.Now()
+	a.mu.Unlock()
+
+	return models, nil
+}
+
+// buildModelList converts OpenRouter's raw model objects into the ModelInfo
+// view, keeping only models that accept image input and computing a per-image
+// cost for each. Exact published prices take precedence; otherwise the cost is
+// estimated from the per-token rates using imageInputTokenEstimate and
+// imageOutputTokenEstimate.
+func buildModelList(rows []openRouterModel) []ModelInfo {
+	models := make([]ModelInfo, 0, len(rows))
+	for _, m := range rows {
+		if !containsString(m.Architecture.Input, "image") {
+			continue
+		}
+		outputsImages := containsString(m.Architecture.Output, "image")
+
+		prompt := parsePrice(m.Pricing.Prompt)
+		completion := parsePrice(m.Pricing.Completion)
+		request := parsePrice(m.Pricing.Request)
+
+		mi := ModelInfo{
+			ID:                   m.ID,
+			Name:                 m.Name,
+			OutputsImages:        outputsImages,
+			PromptPerMillion:     prompt * 1e6,
+			CompletionPerMillion: completion * 1e6,
+			RequestCost:          request,
+		}
+
+		if img := parsePrice(m.Pricing.Image); img > 0 {
+			mi.InputImageCost = img
+			mi.InputImageCostKnown = true
+		} else {
+			mi.InputImageCost = prompt * imageInputTokenEstimate
+		}
+
+		if outputsImages {
+			if img := parsePrice(m.Pricing.ImageOutput); img > 0 {
+				mi.OutputImageCost = img
+				mi.OutputImageCostKnown = true
+			} else {
+				mi.OutputImageCost = completion * imageOutputTokenEstimate
+			}
+		}
+
+		mi.EstimatedImageCost = roundCost(mi.InputImageCost + mi.OutputImageCost + mi.RequestCost)
+		models = append(models, mi)
+	}
+	return models
+}
+
+// parsePrice converts an OpenRouter price string to its float64 value. OpenRouter
+// stores prices as strings, so a missing or malformed value reads as zero, and a
+// negative value (used by OpenRouter as a "price not available" sentinel, e.g.
+// for router models) also reads as zero.
+func parsePrice(v string) float64 {
+	if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+		return f
+	}
+	return 0
+}
+
+// roundCost rounds a computed cost to six decimal places to avoid floating
+// point noise in JSON output.
+func roundCost(c float64) float64 {
+	return math.Round(c*1e6) / 1e6
+}
+
+// containsString reports whether list contains want.
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // prompt returns the current processing prompt so the UI can show and let the

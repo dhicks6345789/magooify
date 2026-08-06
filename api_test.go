@@ -1225,3 +1225,213 @@ func TestExtractCost(t *testing.T) {
 		t.Errorf("extractCost(malformed) = %v, want 0", got)
 	}
 }
+
+func TestBuildModelListFiltersAndEstimates(t *testing.T) {
+	rows := []openRouterModel{
+		// Image in, image out, with exact per-image prices published.
+		{
+			ID:   "google/exact-img-model",
+			Name: "Exact Image Model",
+			Architecture: struct {
+				Input  []string `json:"input_modalities"`
+				Output []string `json:"output_modalities"`
+			}{Input: []string{"image", "text"}, Output: []string{"image", "text"}},
+			Pricing: openRouterPricing{
+				Prompt:      "0.00000025",
+				Completion:  "0.0000015",
+				Image:       "0.0004",
+				ImageOutput: "0.03",
+			},
+		},
+		// Image in, text out, billed per token only.
+		{
+			ID:   "openai/vision-text-model",
+			Name: "Vision Text Model",
+			Architecture: struct {
+				Input  []string `json:"input_modalities"`
+				Output []string `json:"output_modalities"`
+			}{Input: []string{"text", "image"}, Output: []string{"text"}},
+			Pricing: openRouterPricing{Prompt: "0.0000025", Completion: "0.00001"},
+		},
+		// Image in, image out, but no per-image output price published.
+		{
+			ID:   "meta/image-token-model",
+			Name: "Image Token Model",
+			Architecture: struct {
+				Input  []string `json:"input_modalities"`
+				Output []string `json:"output_modalities"`
+			}{Input: []string{"image"}, Output: []string{"image", "text"}},
+			Pricing: openRouterPricing{Prompt: "0.0000001", Completion: "0.0000004"},
+		},
+		// Text-only model must be excluded.
+		{
+			ID:   "anthropic/text-only",
+			Name: "Text Only",
+			Architecture: struct {
+				Input  []string `json:"input_modalities"`
+				Output []string `json:"output_modalities"`
+			}{Input: []string{"text"}, Output: []string{"text"}},
+			Pricing: openRouterPricing{Prompt: "0.0000001", Completion: "0.0000004"},
+		},
+	}
+
+	models := buildModelList(rows)
+	if len(models) != 3 {
+		t.Fatalf("buildModelList kept %d models, want 3 (text-only excluded)", len(models))
+	}
+
+	exact := models[0]
+	if exact.ID != "google/exact-img-model" {
+		t.Fatalf("models[0] = %q, want the exact-priced model", exact.ID)
+	}
+	if !exact.OutputsImages || !exact.InputImageCostKnown || !exact.OutputImageCostKnown {
+		t.Errorf("exact model flags = %+v, want all true", exact)
+	}
+	if exact.InputImageCost != 0.0004 || exact.OutputImageCost != 0.03 {
+		t.Errorf("exact costs = input %v output %v, want 0.0004 / 0.03", exact.InputImageCost, exact.OutputImageCost)
+	}
+	if exact.PromptPerMillion != 0.25 || exact.CompletionPerMillion != 1.5 {
+		t.Errorf("per-million prices = %v / %v, want 0.25 / 1.5", exact.PromptPerMillion, exact.CompletionPerMillion)
+	}
+	if exact.EstimatedImageCost != 0.0304 {
+		t.Errorf("estimated cost = %v, want 0.0304", exact.EstimatedImageCost)
+	}
+
+	vision := models[1]
+	if vision.OutputsImages {
+		t.Errorf("vision text model marked as image output")
+	}
+	if vision.InputImageCostKnown || vision.OutputImageCostKnown {
+		t.Errorf("vision text model should have no exact per-image prices")
+	}
+	if want := 0.0000025 * imageInputTokenEstimate; vision.InputImageCost != want {
+		t.Errorf("estimated input cost = %v, want %v", vision.InputImageCost, want)
+	}
+	if vision.OutputImageCost != 0 {
+		t.Errorf("text-output model should have no output image cost, got %v", vision.OutputImageCost)
+	}
+	if want := roundCost(vision.InputImageCost); vision.EstimatedImageCost != want {
+		t.Errorf("estimated cost = %v, want %v", vision.EstimatedImageCost, want)
+	}
+
+	token := models[2]
+	if !token.OutputsImages {
+		t.Errorf("image token model should output images")
+	}
+	if token.OutputImageCostKnown {
+		t.Errorf("image token model should not have an exact output price")
+	}
+	if want := 0.0000004 * imageOutputTokenEstimate; token.OutputImageCost != want {
+		t.Errorf("estimated output cost = %v, want %v", token.OutputImageCost, want)
+	}
+	if token.EstimatedImageCost != roundCost(token.InputImageCost+token.OutputImageCost) {
+		t.Errorf("estimated cost = %v, want input+output", token.EstimatedImageCost)
+	}
+}
+
+func TestModelsEndpointAndCache(t *testing.T) {
+	body := `{"data":[
+		{"id":"google/gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite",
+		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
+		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.03"}},
+		{"id":"openai/gpt-4o","name":"GPT-4o",
+		 "architecture":{"input_modalities":["image","text"],"output_modalities":["text"]},
+		 "pricing":{"prompt":"0.0000025","completion":"0.00001"}},
+		{"id":"anthropic/claude-text","name":"Text Only",
+		 "architecture":{"input_modalities":["text"],"output_modalities":["text"]},
+		 "pricing":{"prompt":"0.000003","completion":"0.000015"}}
+	]}`
+	hits := 0
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.modelsURL = fake.URL
+
+	// First request hits the upstream and returns models sorted by cost.
+	req := httptest.NewRequest("GET", "/api/v1/models", nil)
+	rr := httptest.NewRecorder()
+	a.models(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ModelsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if len(resp.Models) != 2 {
+		t.Fatalf("got %d models, want 2 (text-only filtered out)", len(resp.Models))
+	}
+	// The cheaper model (0.004, image-input only) sorts before the image-output
+	// model (0.0304, which pays for a generated image).
+	if resp.Models[0].ID != "openai/gpt-4o" {
+		t.Errorf("models[0] = %q, want the cheaper model first", resp.Models[0].ID)
+	}
+	if resp.Models[1].ID != "google/gemini-3.1-flash-lite-image" {
+		t.Errorf("models[1] = %q, want the image-output model second", resp.Models[1].ID)
+	}
+
+	// A second request within the TTL must come from the cache.
+	rr2 := httptest.NewRecorder()
+	a.models(rr2, req)
+	if hits != 1 {
+		t.Errorf("upstream hit count = %d, want 1 (second call cached)", hits)
+	}
+
+	// Expiring the cache forces a refetch.
+	a.mu.Lock()
+	a.modelsCachedAt = a.modelsCachedAt.Add(-2 * modelsCacheTTL)
+	a.mu.Unlock()
+	rr3 := httptest.NewRecorder()
+	a.models(rr3, req)
+	if rr3.Code != http.StatusOK {
+		t.Fatalf("refetch status = %d, want %d", rr3.Code, http.StatusOK)
+	}
+	if hits != 2 {
+		t.Errorf("upstream hit count = %d, want 2 after cache expiry", hits)
+	}
+}
+
+func TestModelsEndpointUpstreamFailure(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.modelsURL = fake.URL
+
+	req := httptest.NewRequest("GET", "/api/v1/models", nil)
+	rr := httptest.NewRecorder()
+	a.models(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusBadGateway, rr.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "status 429") {
+		t.Errorf("error = %q, want a clear upstream status message", resp.Error)
+	}
+}
+
+func TestParsePriceNegativeSentinel(t *testing.T) {
+	if got := parsePrice("-1"); got != 0 {
+		t.Errorf("parsePrice(-1) = %v, want 0 (not-available sentinel)", got)
+	}
+	if got := parsePrice("0"); got != 0 {
+		t.Errorf("parsePrice(0) = %v, want 0", got)
+	}
+	if got := parsePrice("0.00000025"); got != 0.00000025 {
+		t.Errorf("parsePrice(valid) = %v, want 0.00000025", got)
+	}
+	if got := parsePrice("oops"); got != 0 {
+		t.Errorf("parsePrice(malformed) = %v, want 0", got)
+	}
+}

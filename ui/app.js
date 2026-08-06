@@ -9,6 +9,19 @@ document.addEventListener('DOMContentLoaded', () => {
     currency: 'USD',
     maximumFractionDigits: 4,
   });
+  const perMillionFmt = new Intl.NumberFormat(navigator.language || 'en', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  });
+
+  const modelsModal = document.getElementById('modelsModal');
+  const modelsSearch = document.getElementById('models-search');
+  const modelsImageOutput = document.getElementById('models-image-output');
+  const modelsTbody = document.getElementById('models-tbody');
+  const modelsCount = document.getElementById('models-count');
+  let modelsList = null;
+  let currentModelId = null;
 
   const fileInput = document.getElementById('file-input');
   const previewWrap = document.getElementById('preview-wrap');
@@ -94,6 +107,76 @@ document.addEventListener('DOMContentLoaded', () => {
         creditInfo.textContent = '';
       });
   }
+
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[c]));
+  }
+
+  function loadInfo() {
+    fetchJSON('api/v1/info')
+      .then((data) => {
+        currentModelId = data.model || null;
+      })
+      .catch(() => {});
+  }
+
+  async function loadModels() {
+    const data = await fetchJSON('api/v1/models');
+    modelsList = data.models || [];
+    renderModels();
+  }
+
+  function renderModels() {
+    if (!modelsList) return;
+    const q = modelsSearch.value.trim().toLowerCase();
+    const onlyImageOutput = modelsImageOutput.checked;
+    const rows = modelsList.filter((m) => {
+      if (onlyImageOutput && !m.outputs_images) return false;
+      if (!q) return true;
+      return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
+    });
+    modelsCount.textContent = rows.length + ' of ' + modelsList.length + ' models';
+    modelsTbody.innerHTML = '';
+    for (const m of rows) {
+      const tr = document.createElement('tr');
+      const active = m.id === currentModelId
+        ? ' <span class="badge text-bg-primary">active</span>'
+        : '';
+      tr.innerHTML =
+        '<td>' +
+        '<div>' + escapeHTML(m.name) + active + '</div>' +
+        '<div class="font-monospace small text-secondary">' + escapeHTML(m.id) + '</div>' +
+        '</td>' +
+        '<td class="text-end">' + currencyFmt.format(m.estimated_image_cost || 0) + '</td>' +
+        '<td class="text-end">' + perMillionFmt.format(m.prompt_per_million || 0) + '</td>' +
+        '<td class="text-end">' + perMillionFmt.format(m.completion_per_million || 0) + '</td>' +
+        '<td class="text-center">' +
+        (m.outputs_images
+          ? '<span class="text-success">&#10003;</span>'
+          : '<span class="text-secondary">&ndash;</span>') +
+        '</td>';
+      modelsTbody.appendChild(tr);
+    }
+  }
+
+  modelsModal.addEventListener('shown.bs.modal', () => {
+    modelsTbody.innerHTML =
+      '<tr><td colspan="5" class="text-center text-secondary py-4">Loading models...</td></tr>';
+    modelsCount.textContent = '';
+    loadModels().catch((err) => {
+      modelsTbody.innerHTML =
+        '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load models: ' +
+        escapeHTML(err.message) + '</td></tr>';
+    });
+  });
+  modelsSearch.addEventListener('input', renderModels);
+  modelsImageOutput.addEventListener('change', renderModels);
 
   function setProcessing(on) {
     btnProcess.disabled = on || !currentBlob;
@@ -497,4 +580,5 @@ document.addEventListener('DOMContentLoaded', () => {
   checkConnection();
   loadPrompt();
   loadCredits();
+  loadInfo();
 });

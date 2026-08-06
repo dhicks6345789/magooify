@@ -16,6 +16,7 @@
         </span>
         <span class="d-flex align-items-center gap-2">
           <span class="small text-secondary" id="credit-info" title="OpenRouter balance and this session's spend"></span>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#modelsModal">Models</button>
           <span class="badge rounded-pill text-bg-success" id="conn-badge">connected</span>
         </span>
       </div>
@@ -103,6 +104,51 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
             <button type="button" id="btn-capture" class="btn btn-primary" disabled>Capture</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="modelsModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Image-Capable Models</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-2 mb-2 align-items-center">
+              <div class="col-sm-7">
+                <input type="search" id="models-search" class="form-control" placeholder="Search models..." autocomplete="off" />
+              </div>
+              <div class="col-sm-5">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="models-image-output" checked />
+                  <label class="form-check-label" for="models-image-output">Only models that return an image</label>
+                </div>
+              </div>
+            </div>
+            <div class="small text-secondary mb-2" id="models-count"></div>
+            <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th class="text-end">Cost / image</th>
+                    <th class="text-end">Input /1M</th>
+                    <th class="text-end">Output /1M</th>
+                    <th class="text-center">Returns image</th>
+                  </tr>
+                </thead>
+                <tbody id="models-tbody"></tbody>
+              </table>
+            </div>
+            <div class="small text-secondary mt-2">
+              Costs are in US dollars. Exact per-image prices are used when OpenRouter publishes them; otherwise the cost per image is estimated from the model's per-token rates (a typical 1024&times;1024 image plus a generated image output). Prices change, so check <a href="https://openrouter.ai/models" target="_blank" rel="noopener">OpenRouter</a> for the latest.
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
           </div>
         </div>
       </div>

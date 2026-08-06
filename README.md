@@ -62,6 +62,10 @@ The file's text is read from disk on each use; if it can't be read or is empty, 
 
 The UI shows the total cost of the current session (in US dollars, formatted to your locale) in the top bar. When you also supply an OpenRouter *management* key with `-openrouter-management-key` (or the `OPENROUTER_MANAGEMENT_KEY` environment variable), the remaining account balance is shown alongside it. Management keys are administrative-only: they can query your credits but cannot process images, so both keys are needed to see the balance. If the management key is missing or the query fails, the balance is simply hidden and only the session cost is shown.
 
+## Choosing a Model
+
+The **Models** button in the top bar opens a searchable list of the OpenRouter models that accept image input (fetched live from OpenRouter's `/api/v1/models` endpoint and cached briefly), together with the estimated cost of processing a single image with each one. The currently configured model is marked *active*. Exact per-image prices are used when OpenRouter publishes them (image input via `pricing.image`, generated images via `pricing.image_output`); where a model bills by the token instead, the cost per image is estimated from its per-token rates assuming a typical 1024x1024 image plus a generated image output. By default the list only shows models that can also *return* an image, which is what processing needs; uncheck that filter to see text-only vision models too. Prices change, so treat the figures as guidance and check OpenRouter before committing to a model.
+
 ### Server
 
 You can run Magooify behind an authenticating proxy server - the proxy server handles HTTPS, authenticates the user and passes the username to the application via an HTTP header. As the executable is compiled with CGO disabled (CGO_ENABLED=0) and the proxy server is dealing with HTTPS, the container environment can use the `scratch` (completely empty) container image. For instance, if you were using Pangolin as your authenticating server, you would add a basic Dockerfile:
