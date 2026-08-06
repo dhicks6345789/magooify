@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const modelsCount = document.getElementById('models-count');
   let modelsList = null;
   let currentModelId = null;
+  let selectingModel = false;
 
   const fileInput = document.getElementById('file-input');
   const previewWrap = document.getElementById('preview-wrap');
@@ -131,13 +132,17 @@ document.addEventListener('DOMContentLoaded', () => {
     renderModels();
   }
 
-  function renderModels() {
-    if (!modelsList) return;
+  function filteredModels() {
     const q = modelsSearch.value.trim().toLowerCase();
-    const rows = modelsList.filter((m) => {
+    return modelsList.filter((m) => {
       if (!q) return true;
       return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
     });
+  }
+
+  function renderModels() {
+    if (!modelsList) return;
+    const rows = filteredModels();
     modelsCount.textContent = rows.length + ' models';
     modelsTbody.innerHTML = '';
     for (const m of rows) {
@@ -145,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const active = m.id === currentModelId
         ? ' <span class="badge text-bg-primary">active</span>'
         : '';
+      tr.title = 'Use ' + m.id;
       tr.innerHTML =
         '<td>' +
         '<div>' + escapeHTML(m.name) + active + '</div>' +
@@ -153,7 +159,29 @@ document.addEventListener('DOMContentLoaded', () => {
         '<td class="text-end">' + currencyFmt.format(m.estimated_image_cost || 0) + '</td>' +
         '<td class="text-end">' + perMillionFmt.format(m.prompt_per_million || 0) + '</td>' +
         '<td class="text-end">' + perMillionFmt.format(m.completion_per_million || 0) + '</td>';
+      tr.addEventListener('click', () => selectModel(m));
       modelsTbody.appendChild(tr);
+    }
+  }
+
+  async function selectModel(m) {
+    if (selectingModel || m.id === currentModelId) return;
+    selectingModel = true;
+    modelsCount.textContent = 'Switching to ' + m.id + '...';
+    try {
+      const data = await fetchJSON('api/v1/model', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: m.id }),
+      });
+      currentModelId = data.model || m.id;
+      renderModels();
+      modelsCount.textContent =
+        filteredModels().length + ' models · now using ' + currentModelId;
+    } catch (err) {
+      modelsCount.textContent = 'Failed to switch model: ' + err.message;
+    } finally {
+      selectingModel = false;
     }
   }
 

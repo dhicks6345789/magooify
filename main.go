@@ -245,6 +245,7 @@ func buildHandler(a *api, basePaths []string) http.Handler {
 	mux.HandleFunc("POST /api/v1/process", a.processImage)
 	mux.HandleFunc("GET /api/v1/credits", a.credits)
 	mux.HandleFunc("GET /api/v1/models", a.models)
+	mux.HandleFunc("PUT /api/v1/model", a.setModel)
 	mux.HandleFunc("GET /api/v1/images", a.listImages)
 	mux.HandleFunc("GET /api/v1/images/{filename}", a.getImage)
 

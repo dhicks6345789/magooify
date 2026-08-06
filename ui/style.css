@@ -87,6 +87,14 @@ body {
   border-radius: 0.5rem;
 }
 
+#models-tbody tr {
+  cursor: pointer;
+}
+
+#models-tbody tr.selected {
+  background: rgba(99, 102, 241, 0.12);
+}
+
 .camera-video {
   width: 100%;
   max-height: 60vh;

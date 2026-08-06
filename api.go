@@ -72,6 +72,12 @@ type CreateItemRequest struct {
 	Name string `json:"name" validate:"required" example:"Sample Item"`
 }
 
+// SetModelRequest is the payload accepted when switching the model used to
+// process images.
+type SetModelRequest struct {
+	Model string `json:"model" example:"recraft/recraft-v4.1-vector"`
+}
+
 // UserInfo describes the currently authenticated user.
 type UserInfo struct {
 	Username string `json:"username" example:"alice"`
@@ -474,6 +480,50 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ModelsResponse{Models: models})
+}
+
+// setModel switches the model used to process images. The model must be one of
+// the listed image processing models, so the request is validated against the
+// current catalogue before the change is applied.
+// @Summary Set Processing Model
+// @Description Switches the model used to process images to one of the listed image processing models.
+// @Accept json
+// @Produce json
+// @Param body body SetModelRequest true "Model to use"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 502 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
+// @Router /api/v1/model [put]
+func (a *api) setModel(w http.ResponseWriter, r *http.Request) {
+	var req SetModelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Model) == "" {
+		a.jsonError(w, http.StatusBadRequest, "Missing model ID")
+		return
+	}
+	model := strings.TrimSpace(req.Model)
+
+	known, err := a.fetchModels()
+	if err != nil {
+		code := http.StatusBadGateway
+		if errors.Is(err, errOpenRouterNotConfigured) {
+			code = http.StatusServiceUnavailable
+		}
+		a.jsonError(w, code, "Cannot validate the model: "+err.Error())
+		return
+	}
+	for _, m := range known {
+		if m.ID == model {
+			a.mu.Lock()
+			a.model = model
+			a.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"model": model})
+			return
+		}
+	}
+	a.jsonError(w, http.StatusNotFound, "Unknown model: "+model)
 }
 
 // fetchModels returns the list of OpenRouter models that accept image input

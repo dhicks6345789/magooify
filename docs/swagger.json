@@ -165,6 +165,64 @@
                 }
             }
         },
+        "/api/v1/model": {
+            "put": {
+                "description": "Switches the model used to process images to one of the listed image processing models.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Set Processing Model",
+                "parameters": [
+                    {
+                        "description": "Model to use",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/SetModelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/models": {
             "get": {
                 "description": "Lists OpenRouter models that can process an image and return a processed image, with the cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when OpenRouter publishes them; otherwise costs are estimated from the per-token rates.",
@@ -460,6 +518,15 @@
                 },
                 "session_cost": {
                     "type": "number"
+                }
+            }
+        },
+        "SetModelRequest": {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string",
+                    "example": "recraft/recraft-v4.1-vector"
                 }
             }
         },

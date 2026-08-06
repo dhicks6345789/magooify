@@ -1545,6 +1545,80 @@ func TestModelsEndpointRequiresKey(t *testing.T) {
 	}
 }
 
+func TestSetModel(t *testing.T) {
+	listBody := `{"data":[
+		{"id":"google/gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite",
+		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
+		 "endpoints":""},
+		{"id":"recraft/recraft-v4.1-vector","name":"Recraft V4.1 Vector",
+		 "architecture":{"input_modalities":["image"],"output_modalities":["image"]},
+		 "endpoints":""}
+	]}`
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, listBody)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.imagesURL = fake.URL
+	a.openRouterKey = "test-key"
+	if a.model != defaultModel {
+		t.Fatalf("initial model = %q, want %q", a.model, defaultModel)
+	}
+
+	// Switching to a known model succeeds and takes effect immediately.
+	req := httptest.NewRequest("PUT", "/api/v1/model",
+		strings.NewReader(`{"model":"recraft/recraft-v4.1-vector"}`))
+	rr := httptest.NewRecorder()
+	a.setModel(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setModel status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if a.model != "recraft/recraft-v4.1-vector" {
+		t.Errorf("model = %q after switch, want recraft/recraft-v4.1-vector", a.model)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["model"] != "recraft/recraft-v4.1-vector" {
+		t.Errorf("response model = %q, want the switched model", resp["model"])
+	}
+
+	// An unknown model is rejected and the current model is unchanged.
+	req2 := httptest.NewRequest("PUT", "/api/v1/model", strings.NewReader(`{"model":"no/such-model"}`))
+	rr2 := httptest.NewRecorder()
+	a.setModel(rr2, req2)
+	if rr2.Code != http.StatusNotFound {
+		t.Fatalf("unknown model status = %d, want %d", rr2.Code, http.StatusNotFound)
+	}
+	if a.model != "recraft/recraft-v4.1-vector" {
+		t.Errorf("model changed after a rejected switch: %q", a.model)
+	}
+
+	// Empty and malformed payloads are rejected.
+	for _, body := range []string{`{}`, `{"model":""}`, `oops`} {
+		rr3 := httptest.NewRecorder()
+		a.setModel(rr3, httptest.NewRequest("PUT", "/api/v1/model", strings.NewReader(body)))
+		if rr3.Code != http.StatusBadRequest {
+			t.Errorf("payload %q status = %d, want %d", body, rr3.Code, http.StatusBadRequest)
+		}
+	}
+}
+
+func TestSetModelRequiresKey(t *testing.T) {
+	a := newAPI(false, docsFS)
+
+	req := httptest.NewRequest("PUT", "/api/v1/model",
+		strings.NewReader(`{"model":"google/gemini-3.1-flash-lite-image"}`))
+	rr := httptest.NewRecorder()
+	a.setModel(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+}
+
 func TestModelsEndpointEndpointsFailure(t *testing.T) {
 	listBody := `{"data":[
 		{"id":"recraft/recraft-v4.1-vector","name":"Recraft V4.1 Vector",
