@@ -29,6 +29,7 @@ const (
 	openRouterCreditsURL = "https://openrouter.ai/api/v1/credits"
 	openRouterModelsURL  = "https://openrouter.ai/api/v1/models"
 	modelsCacheTTL       = 30 * time.Minute
+	modelsMaxPages       = 10
 	defaultModel         = "google/gemini-3.1-flash-lite-image"
 	defaultOutputDir     = "processed"
 	fallbackPrompt       = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
@@ -430,6 +431,16 @@ type openRouterModel struct {
 	Pricing openRouterPricing `json:"pricing"`
 }
 
+// modelsPageResponse mirrors the paginated envelope OpenRouter returns for the
+// models listing. When Links.Next is non-empty another page of results is
+// available at that URL.
+type modelsPageResponse struct {
+	Data  []openRouterModel `json:"data"`
+	Links struct {
+		Next string `json:"next"`
+	} `json:"links"`
+}
+
 // models returns the OpenRouter models that can process an image and return a
 // processed image, together with the estimated cost of processing a single
 // image with each one, cheapest first.
@@ -438,11 +449,16 @@ type openRouterModel struct {
 // @Produce json
 // @Success 200 {object} ModelsResponse
 // @Failure 502 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Router /api/v1/models [get]
 func (a *api) models(w http.ResponseWriter, r *http.Request) {
 	models, err := a.fetchModels()
 	if err != nil {
-		a.jsonError(w, http.StatusBadGateway, err.Error())
+		code := http.StatusBadGateway
+		if errors.Is(err, errOpenRouterNotConfigured) {
+			code = http.StatusServiceUnavailable
+		}
+		a.jsonError(w, code, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -450,10 +466,12 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 }
 
 // fetchModels returns the list of OpenRouter models that accept image input
-// and return a processed image, cheapest first. The result is cached briefly so
-// the UI can reload without hammering OpenRouter; the request is public and
-// does not require a key, but the configured key is sent when present so rate
-// limits apply to the account.
+// and return a processed image, cheapest first. The listing requires the
+// OpenRouter API key: unauthenticated requests only receive a restricted
+// subset of the catalog, so the configured key is always sent. OpenRouter
+// paginates the listing (limit 1000 per page), so follow the links.next URL
+// until the final page. The result is cached briefly so the UI can reload
+// without hammering OpenRouter.
 func (a *api) fetchModels() ([]ModelInfo, error) {
 	a.mu.RLock()
 	if a.modelsCache != nil && time.Since(a.modelsCachedAt) < modelsCacheTTL {
@@ -463,31 +481,52 @@ func (a *api) fetchModels() ([]ModelInfo, error) {
 	}
 	a.mu.RUnlock()
 
-	req, err := http.NewRequest(http.MethodGet, a.modelsURL, nil)
+	if a.openRouterKey == "" {
+		return nil, errOpenRouterNotConfigured
+	}
+
+	pageURL, err := url.Parse(a.modelsURL)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to build OpenRouter models request: %w", err)
 	}
-	if a.openRouterKey != "" {
+	q := pageURL.Query()
+	q.Set("limit", "1000")
+	pageURL.RawQuery = q.Encode()
+
+	var rows []openRouterModel
+	for page := 0; page < modelsMaxPages; page++ {
+		req, err := http.NewRequest(http.MethodGet, pageURL.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to build OpenRouter models request: %w", err)
+		}
 		req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
+
+		resp, err := a.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to fetch models from OpenRouter: %w", err)
+		}
+		var body modelsPageResponse
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, maxOpenRouterBytes)).Decode(&body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("OpenRouter models request returned status %d", resp.StatusCode)
+		}
+		if decodeErr != nil {
+			return nil, fmt.Errorf("Failed to parse OpenRouter models response: %w", decodeErr)
+		}
+
+		rows = append(rows, body.Data...)
+		if body.Links.Next == "" {
+			break
+		}
+		next, err := url.Parse(body.Links.Next)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to parse OpenRouter models next page URL: %w", err)
+		}
+		pageURL = pageURL.ResolveReference(next)
 	}
 
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to fetch models from OpenRouter: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenRouter models request returned status %d", resp.StatusCode)
-	}
-
-	var body struct {
-		Data []openRouterModel `json:"data"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOpenRouterBytes)).Decode(&body); err != nil {
-		return nil, fmt.Errorf("Failed to parse OpenRouter models response: %w", err)
-	}
-
-	models := buildModelList(body.Data)
+	models := buildModelList(rows)
 	sort.Slice(models, func(i, j int) bool {
 		if models[i].EstimatedImageCost != models[j].EstimatedImageCost {
 			return models[i].EstimatedImageCost < models[j].EstimatedImageCost

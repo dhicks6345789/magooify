@@ -1331,6 +1331,12 @@ func TestModelsEndpointAndCache(t *testing.T) {
 	hits := 0
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Errorf("request Authorization header = %q, want the configured key", r.Header.Get("Authorization"))
+		}
+		if r.URL.Query().Get("limit") != "1000" {
+			t.Errorf("limit query = %q, want 1000", r.URL.Query().Get("limit"))
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, body)
 	}))
@@ -1338,6 +1344,7 @@ func TestModelsEndpointAndCache(t *testing.T) {
 
 	a := newAPI(false, docsFS)
 	a.modelsURL = fake.URL
+	a.openRouterKey = "test-key"
 
 	// First request hits the upstream and returns models sorted by cost.
 	req := httptest.NewRequest("GET", "/api/v1/models", nil)
@@ -1391,6 +1398,7 @@ func TestModelsEndpointUpstreamFailure(t *testing.T) {
 
 	a := newAPI(false, docsFS)
 	a.modelsURL = fake.URL
+	a.openRouterKey = "test-key"
 
 	req := httptest.NewRequest("GET", "/api/v1/models", nil)
 	rr := httptest.NewRecorder()
@@ -1405,6 +1413,79 @@ func TestModelsEndpointUpstreamFailure(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "status 429") {
 		t.Errorf("error = %q, want a clear upstream status message", resp.Error)
+	}
+}
+
+func TestModelsEndpointRequiresKey(t *testing.T) {
+	a := newAPI(false, docsFS)
+
+	req := httptest.NewRequest("GET", "/api/v1/models", nil)
+	rr := httptest.NewRecorder()
+	a.models(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "API key not configured") {
+		t.Errorf("error = %q, want a clear not-configured message", resp.Error)
+	}
+}
+
+func TestModelsEndpointPaginates(t *testing.T) {
+	page1 := `{"data":[
+		{"id":"google/gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite",
+		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
+		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.03"}}
+	],"links":{"next":"__NEXT__"}}`
+	page2 := `{"data":[
+		{"id":"recraft/recraft-v4.1-pro-vector","name":"Recraft V4.1 Pro Vector",
+		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image"]},
+		 "pricing":{"prompt":"0","completion":"0","image_output":"0.0000718562874251497"}}
+	],"links":{"next":""}}`
+
+	var fake *httptest.Server
+	handled := 0
+	fake = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handled++
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("offset") != "" {
+			fmt.Fprint(w, page2)
+			return
+		}
+		fmt.Fprint(w, strings.Replace(page1, "__NEXT__", fake.URL+"?limit=1000&offset=1", 1))
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.modelsURL = fake.URL
+	a.openRouterKey = "test-key"
+
+	req := httptest.NewRequest("GET", "/api/v1/models", nil)
+	rr := httptest.NewRecorder()
+	a.models(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ModelsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if handled != 2 {
+		t.Errorf("upstream requests = %d, want 2 (next page followed)", handled)
+	}
+	if len(resp.Models) != 2 {
+		t.Fatalf("got %d models, want 2 from both pages", len(resp.Models))
+	}
+	ids := map[string]bool{}
+	for _, m := range resp.Models {
+		ids[m.ID] = true
+	}
+	if !ids["recraft/recraft-v4.1-pro-vector"] || !ids["google/gemini-3.1-flash-lite-image"] {
+		t.Errorf("models = %v, want both page models", ids)
 	}
 }
 
