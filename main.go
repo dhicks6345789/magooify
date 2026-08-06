@@ -63,6 +63,9 @@ func main() {
 	basePath := flag.String("base-path", getEnv("BASE_PATH", ""), "Comma-separated URL prefixes to serve under when mounted behind a reverse proxy at sub-paths (e.g. /magooify); the app is always also served from the site root")
 	noBrowser := flag.Bool("no-browser", false, "Disable automatic browser launch in desktop mode")
 	genDocs := flag.String("gen-docs", "", "Write the Swagger UI documentation page to the given path and exit")
+	openRouterKey := flag.String("openrouter-key", getEnv("OPENROUTER_API_KEY", ""), "OpenRouter API key used to process captured images")
+	outputDir := flag.String("output-dir", getEnv("OUTPUT_DIR", defaultOutputDir), "Directory where processed images and their descriptions are stored")
+	model := flag.String("model", getEnv("OPENROUTER_MODEL", defaultModel), "OpenRouter model used to process images")
 	flag.Parse()
 
 	// Offline documentation generation (used by the build script to produce docs/api.html).
@@ -89,6 +92,9 @@ func main() {
 	basePaths := parseBasePaths(*basePath)
 
 	a := newAPI(isServerMode, docsFS)
+	a.openRouterKey = *openRouterKey
+	a.outputDir = *outputDir
+	a.model = *model
 
 	handler := buildHandler(a, basePaths)
 
@@ -99,6 +105,12 @@ func main() {
 	log.Printf("Mode      : %s", strings.ToUpper(user.Mode))
 	log.Printf("User      : %s (%s)", user.Username, user.AuthType)
 	log.Printf("Listening : http://%s", addr)
+	if a.openRouterKey != "" {
+		log.Printf("OpenRouter: configured (model %s)", a.model)
+	} else {
+		log.Printf("OpenRouter: NOT configured (use -openrouter-key)")
+	}
+	log.Printf("Output dir: %s", a.outputDir)
 	for _, bp := range basePaths {
 		log.Printf("Base path : %s", bp)
 		log.Printf("UI        : http://%s%s/", addr, bp)
@@ -212,6 +224,9 @@ func buildHandler(a *api, basePaths []string) http.Handler {
 	mux.HandleFunc("/api/v1/info", a.info)
 	mux.HandleFunc("GET /api/v1/items", a.listItems)
 	mux.HandleFunc("POST /api/v1/items", a.createItem)
+	mux.HandleFunc("POST /api/v1/process", a.processImage)
+	mux.HandleFunc("GET /api/v1/images", a.listImages)
+	mux.HandleFunc("GET /api/v1/images/{filename}", a.getImage)
 
 	mux.HandleFunc("/docs/api", a.serveDocs)
 	mux.HandleFunc("/docs/", a.serveDocs)

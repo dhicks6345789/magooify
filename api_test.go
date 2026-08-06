@@ -2,13 +2,21 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// miniPNG is a valid 1x1 transparent PNG used as test image data.
+var miniPNG, _ = base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 
 func TestRegisteredMimeTypes(t *testing.T) {
 	registerMimeTypes()
@@ -525,5 +533,243 @@ func TestParseBasePaths(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestProcessImageNoKey(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(miniPNG)
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "OpenRouter API key not configured") {
+		t.Errorf("error = %q, want a key-not-configured message", resp.Error)
+	}
+
+	entries, _ := os.ReadDir(a.outputDir)
+	if len(entries) != 0 {
+		t.Errorf("expected nothing stored when processing fails, found %d files", len(entries))
+	}
+}
+
+func TestProcessImageRejectsNonImage(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.outputDir = t.TempDir()
+
+	b64 := base64.StdEncoding.EncodeToString([]byte("this is not an image"))
+	payload := fmt.Sprintf(`{"image":"%s"}`, b64)
+	req := httptest.NewRequest("POST", "/api/v1/process", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
+func TestImageProcessingRoutes(t *testing.T) {
+	registerMimeTypes()
+
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Errorf("Authorization = %q, want %q", got, "Bearer test-key")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode OpenRouter request: %v", err)
+		}
+		if body["model"] != "openai/gpt-4o-mini" {
+			t.Errorf("model = %v, want %q", body["model"], "openai/gpt-4o-mini")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"A tiny test image"}}]}`))
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+	handler := buildHandler(a, nil)
+
+	// Process a multipart image upload.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(miniPNG)
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("process status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var processed ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &processed); err != nil {
+		t.Fatalf("failed to parse process response: %v", err)
+	}
+	if processed.Description != "A tiny test image" {
+		t.Errorf("description = %q, want %q", processed.Description, "A tiny test image")
+	}
+	if !strings.HasSuffix(processed.Filename, ".png") {
+		t.Errorf("filename = %q, want a .png name", processed.Filename)
+	}
+	if processed.TextFile == "" || !strings.HasSuffix(processed.TextFile, ".txt") {
+		t.Errorf("text_file = %q, want a .txt name", processed.TextFile)
+	}
+
+	// Both files must exist on disk.
+	if _, err := os.Stat(filepath.Join(a.outputDir, processed.Filename)); err != nil {
+		t.Errorf("stored image missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(a.outputDir, processed.TextFile)); err != nil {
+		t.Errorf("stored description missing: %v", err)
+	}
+
+	// The stored image must be listed, newest first, with its description.
+	req2 := httptest.NewRequest("GET", "/api/v1/images", nil)
+	rr2 := httptest.NewRecorder()
+	handler.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d", rr2.Code, http.StatusOK)
+	}
+	var list ImagesResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &list); err != nil {
+		t.Fatalf("failed to parse list response: %v", err)
+	}
+	if len(list.Images) != 1 {
+		t.Fatalf("list has %d images, want 1", len(list.Images))
+	}
+	if list.Images[0].Filename != processed.Filename {
+		t.Errorf("listed filename = %q, want %q", list.Images[0].Filename, processed.Filename)
+	}
+	if list.Images[0].Description != "A tiny test image" {
+		t.Errorf("listed description = %q, want %q", list.Images[0].Description, "A tiny test image")
+	}
+
+	// The stored image must be served back with the correct content type.
+	req3 := httptest.NewRequest("GET", "/api/v1/images/"+processed.Filename, nil)
+	rr3 := httptest.NewRecorder()
+	handler.ServeHTTP(rr3, req3)
+	if rr3.Code != http.StatusOK {
+		t.Fatalf("get status = %d, want %d", rr3.Code, http.StatusOK)
+	}
+	if ct := rr3.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("content-type = %q, want %q", ct, "image/png")
+	}
+	if !bytes.Equal(rr3.Body.Bytes(), miniPNG) {
+		t.Errorf("served image bytes do not match the uploaded image")
+	}
+}
+
+func TestProcessImageJSONPayload(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	b64 := base64.StdEncoding.EncodeToString(miniPNG)
+	payload := fmt.Sprintf(`{"image":"data:image/png;base64,%s","filename":"test.png"}`, b64)
+	req := httptest.NewRequest("POST", "/api/v1/process", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Description != "OK" {
+		t.Errorf("description = %q, want %q", resp.Description, "OK")
+	}
+}
+
+func TestGetImageRejectsPathTraversal(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	req := httptest.NewRequest("GET", "/api/v1/images/whatever", nil)
+	req.SetPathValue("filename", "../../etc/passwd")
+	rr := httptest.NewRecorder()
+
+	a.getImage(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+}
+
+func TestOpenRouterUpstreamFailure(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"message":"bad model"}}`))
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("image", "photo.png")
+	fw.Write(miniPNG)
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusBadGateway, rr.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "OpenRouter returned status") {
+		t.Errorf("error = %q, want upstream failure message", resp.Error)
 	}
 }

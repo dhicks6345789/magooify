@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Magooify</title>
+    <title>Magooify - Image Processing</title>
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css" />
     <link rel="stylesheet" href="style.css" />
   </head>
@@ -11,10 +11,11 @@
     <nav class="navbar navbar-expand-lg border-bottom mb-4">
       <div class="container-fluid">
         <span class="navbar-brand">
-          <span class="brand-icon">⚡</span>
+          <span class="brand-icon">M</span>
           Magooify
         </span>
         <div class="d-flex align-items-center gap-2">
+          <a href="docs/api" class="btn btn-sm btn-outline-light">API Docs</a>
           <span class="badge rounded-pill text-bg-success" id="conn-badge">connected</span>
           <div class="text-end user-badge" id="user-badge">
             <div class="fw-semibold" id="user-name">Loading&hellip;</div>
@@ -27,100 +28,96 @@
     <main class="container-fluid">
       <div class="card mb-4 hero-card">
         <div class="card-body">
-          <h2 class="h4 mb-2">Welcome to Magooify</h2>
+          <h2 class="h4 mb-2">Capture &amp; Process Images</h2>
           <p class="mb-3 text-secondary">
-            This self-contained executable bundles backend API endpoints, a Bootstrap single-page
-            frontend, and auto-generated OpenAPI documentation all into a single binary. Works
-            completely offline.
+            Take a photo with your device camera or upload an image file. Magooify sends it to an
+            OpenRouter vision model for processing, then saves the image and the result to a folder
+            on your machine.
           </p>
           <div class="d-flex gap-2 flex-wrap">
-            <a href="docs/api" class="btn btn-primary">Open API Docs (/docs/api)</a>
-            <button type="button" class="btn btn-outline-light" data-endpoint="api/v1/user">Verify Auth (/api/v1/user)</button>
-            <button type="button" class="btn btn-outline-light" data-endpoint="api/v1/health">Health Check (/api/v1/health)</button>
+            <button type="button" id="btn-camera" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#cameraModal">Take Photo</button>
+            <button type="button" id="btn-upload" class="btn btn-outline-light">Upload Image</button>
+            <input type="file" id="file-input" accept="image/*" hidden />
           </div>
         </div>
       </div>
 
       <div class="row g-3">
-        <div class="col-lg-4">
+        <div class="col-lg-5">
           <div class="card h-100">
             <div class="card-header">
-              <h3 class="h6 mb-0">System Status</h3>
-            </div>
-            <ul class="list-group list-group-flush">
-              <li class="list-group-item d-flex justify-content-between">
-                <span class="text-secondary">Operation Mode</span>
-                <span class="font-monospace status-value" id="info-mode">Loading&hellip;</span>
-              </li>
-              <li class="list-group-item d-flex justify-content-between">
-                <span class="text-secondary">Authenticated User</span>
-                <span class="font-monospace status-value" id="info-user">Loading&hellip;</span>
-              </li>
-              <li class="list-group-item d-flex justify-content-between">
-                <span class="text-secondary">Auth Provider</span>
-                <span class="font-monospace status-value" id="info-auth">Loading&hellip;</span>
-              </li>
-              <li class="list-group-item d-flex justify-content-between">
-                <span class="text-secondary">Go Version</span>
-                <span class="font-monospace status-value" id="info-go">-</span>
-              </li>
-              <li class="list-group-item d-flex justify-content-between">
-                <span class="text-secondary">OS / Architecture</span>
-                <span class="font-monospace status-value" id="info-os">-</span>
-              </li>
-              <li class="list-group-item d-flex justify-content-between">
-                <span class="text-secondary">Uptime</span>
-                <span class="font-monospace status-value" id="info-uptime">-</span>
-              </li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="col-lg-8">
-          <div class="card h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
-              <h3 class="h6 mb-0">Application Resources (/api/v1/items)</h3>
-              <span class="badge text-bg-primary" id="items-count">0 items</span>
+              <h3 class="h6 mb-0">Current Image</h3>
             </div>
             <div class="card-body">
-              <form id="item-form" class="d-flex gap-2 mb-3">
-                <input
-                  type="text"
-                  id="item-name"
-                  class="form-control"
-                  placeholder="Enter new item name..."
-                  autocomplete="off"
-                  required
-                />
-                <button type="submit" class="btn btn-primary text-nowrap">+ Add Item</button>
-              </form>
-              <ul class="list-group items-list" id="items-list"></ul>
+              <div id="preview-wrap" class="preview-wrap d-none">
+                <img id="preview" alt="Selected image" class="preview-img" />
+              </div>
+              <div id="no-image" class="text-center text-secondary py-5">No image selected</div>
+              <button type="button" id="btn-process" class="btn btn-success w-100 mt-3" disabled>Process with OpenRouter</button>
+              <div id="process-status" class="small mt-2 text-secondary">&nbsp;</div>
             </div>
           </div>
         </div>
 
-        <div class="col-12">
-          <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-              <h3 class="h6 mb-0">API Inspector &amp; Response Viewer</h3>
-              <div class="d-flex gap-2 flex-wrap">
-                <button type="button" class="btn btn-sm btn-outline-light" data-endpoint="api/v1/health">GET /health</button>
-                <button type="button" class="btn btn-sm btn-outline-light" data-endpoint="api/v1/user">GET /user</button>
-                <button type="button" class="btn btn-sm btn-outline-light" data-endpoint="api/v1/info">GET /info</button>
-                <button type="button" class="btn btn-sm btn-outline-light" data-endpoint="api/v1/items">GET /items</button>
+        <div class="col-lg-7">
+          <div class="card h-100">
+            <div class="card-header">
+              <h3 class="h6 mb-0">Processing Result</h3>
+            </div>
+            <div class="card-body">
+              <div id="result-placeholder" class="text-center text-secondary py-5">Nothing processed yet</div>
+              <div id="result-body" class="d-none">
+                <div id="result-description" class="code-block mb-0"></div>
+                <dl class="row small mt-3 mb-0">
+                  <dt class="col-4">Image file</dt>
+                  <dd class="col-8 font-monospace" id="result-filename">-</dd>
+                  <dt class="col-4">Description file</dt>
+                  <dd class="col-8 font-monospace" id="result-textfile">-</dd>
+                  <dt class="col-4">Model</dt>
+                  <dd class="col-8 font-monospace" id="result-model">-</dd>
+                  <dt class="col-4">Processed</dt>
+                  <dd class="col-8" id="result-time">-</dd>
+                </dl>
               </div>
             </div>
-            <div class="card-body">
-              <pre class="code-block mb-0" id="api-response">Click an API test button to view response...</pre>
-            </div>
           </div>
+        </div>
+      </div>
+
+      <div class="card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <h3 class="h6 mb-0">Recent Captures</h3>
+          <button type="button" id="btn-refresh" class="btn btn-sm btn-outline-light">Refresh</button>
+        </div>
+        <div class="card-body">
+          <div id="gallery" class="row g-3"></div>
+          <div id="gallery-empty" class="text-center text-secondary py-4">No processed images yet.</div>
         </div>
       </div>
     </main>
 
     <footer class="footer">
-      <p>Magooify &middot; Self-Hosted &amp; Offline Capable &middot; Built with Go &amp; Bootstrap</p>
+      <p>Magooify &middot; Camera &amp; upload image processing via OpenRouter &middot; Built with Go &amp; Bootstrap</p>
     </footer>
+
+    <div class="modal fade" id="cameraModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Take a Photo</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <video id="camera-video" autoplay playsinline muted class="camera-video"></video>
+            <div id="camera-error" class="alert alert-warning d-none mb-0"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" id="btn-capture" class="btn btn-primary" disabled>Capture</button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="app.js"></script>

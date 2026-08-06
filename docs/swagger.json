@@ -24,6 +24,61 @@
                 }
             }
         },
+        "/api/v1/images": {
+            "get": {
+                "description": "Lists the processed images stored in the configured output directory, newest first.",
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "List Stored Images",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ImagesResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/images/{filename}": {
+            "get": {
+                "description": "Serves a processed image stored in the output directory.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "summary": "Get Stored Image",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Image filename",
+                        "name": "filename",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/info": {
             "get": {
                 "description": "Returns system metrics, Go version, OS/Arch, and uptime.",
@@ -93,6 +148,53 @@
                 }
             }
         },
+        "/api/v1/process": {
+            "post": {
+                "description": "Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the image and the resulting description in the configured output directory.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Process an Image with OpenRouter",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Image to process",
+                        "name": "image",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ProcessImageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/user": {
             "get": {
                 "description": "Returns authenticated user info based on environment or proxy headers.",
@@ -146,6 +248,17 @@
                 }
             }
         },
+        "ImagesResponse": {
+            "type": "object",
+            "properties": {
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/StoredImage"
+                    }
+                }
+            }
+        },
         "Item": {
             "type": "object",
             "properties": {
@@ -171,6 +284,54 @@
                     "items": {
                         "$ref": "#/definitions/Item"
                     }
+                }
+            }
+        },
+        "ProcessImageResponse": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "example": "A sunny garden with a wooden bench."
+                },
+                "filename": {
+                    "type": "string",
+                    "example": "img-20260806-123000-a1b2c3d4.jpg"
+                },
+                "model": {
+                    "type": "string",
+                    "example": "openai/gpt-4o-mini"
+                },
+                "processed_at": {
+                    "type": "string"
+                },
+                "text_file": {
+                    "type": "string",
+                    "example": "img-20260806-123000-a1b2c3d4.txt"
+                }
+            }
+        },
+        "StoredImage": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "example": "A sunny garden with a wooden bench."
+                },
+                "filename": {
+                    "type": "string",
+                    "example": "img-20260806-123000-a1b2c3d4.jpg"
+                },
+                "modified": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer",
+                    "example": 48291
+                },
+                "text_file": {
+                    "type": "string",
+                    "example": "img-20260806-123000-a1b2c3d4.txt"
                 }
             }
         },

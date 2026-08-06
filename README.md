@@ -2,12 +2,15 @@
 
 Magooify is a self-hostable Go application that bundles application logic, an embedded Bootstrap web user interface and interactive OpenAPI documentation into a single executable.
 
-This application itself doesn't do anything much, it just presents a basic user interface showing the current user name. 
+The web interface lets you take a photo with your device camera or upload an image file. Magooify sends the image to a vision-capable model on OpenRouter for processing, then saves the image and the model's description to a folder on disk.
 
 ## Features
 
+- **Image Capture**: Take photos directly with your device camera (via `getUserMedia`) or upload image files from your machine.
+- **OpenRouter Processing**: Captured images are sent to a vision model on OpenRouter for description and analysis.
+- **File System Storage**: Processed images and their text descriptions are saved to a configurable output directory.
 - **Single Executable Deployment**: Uses Go's `embed` package to bundle the frontend HTML / CSS / JavaScript assets, documentation and OpenAPI specifications into a single binary.
-- **Offline Operation**: Designed to be able to operate without internet access; all UI libraries and documentation resources are served locally.
+- **Offline Operation**: Designed to be able to operate without internet access; all UI libraries and documentation resources are served locally. (Note: processing an image needs internet access to reach OpenRouter.)
 - **Works on Desktop and Server**:
   - **Desktop Mode**: Ideal for local home desktop use on pretty much any platform ([Windows](https://www.microsoft.com/windows/) / [Windows Server](https://www.microsoft.com/windows-server), [MacOS](https://en.wikipedia.org/wiki/MacOS), and [Linux](https://en.wikipedia.org/wiki/Linux), including both the [Raspberry Pi](https://www.raspberrypi.com/) (and other single-board computers) and [ChromeOS](https://chromeos.google/intl/en_uk/products/chromeos-flex/) ([Crostini](https://chromeos.dev/en/linux))). Running the executable on your desktop machine should give you a localhost-only server and automatically launch your default web browser to display the user interface.
   - **Server Mode**: Suitable for multi-user deployment behind authenticating reverse proxies ([Pangolin](https://pangolin.net/), [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/), [Authelia](https://www.authelia.com/), [Tailscale](https://tailscale.com/), [etc](https://github.com/anderspitman/awesome-tunneling)). Authenticates users via incoming proxy headers (`X-Forwarded-User`, `Remote-User`, `Pangolin-User`, etc.). As a single, statically linked Go binary with no external dependencies, it can be run inside a very minimal (`scratch`) container environment.
@@ -20,7 +23,26 @@ This application itself doesn't do anything much, it just presents a basic user 
 
 ### Desktop
 
-Simply download and run the executable for your platform from the [project homepage](https://sansay.co.uk/magooify/).
+Simply download and run the executable for your platform from the [project homepage](https://sansay.co.uk/magooify/). To process images you need to supply an OpenRouter API key and the folder where processed images should be stored:
+
+```
+./magooify -openrouter-key=sk-or-v1-... -output-dir=~/magooify-images
+```
+
+Optional flags:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the image endpoint reports that OpenRouter is not configured. |
+| `-output-dir` | `processed` | Folder where processed images and their text descriptions are stored. |
+| `-model` | `openai/gpt-4o-mini` | OpenRouter model used to process the images (any vision-capable model). |
+| `-port` | `8080` | Port for the local server. |
+| `-mode` | `desktop` | `desktop` or `server`. |
+| `-host` | (derived) | Host IP to bind to (`127.0.0.1` in desktop mode, `0.0.0.0` in server mode). |
+| `-base-path` | (unset) | Reverse-proxy sub-path prefix, e.g. `/magooify`. |
+| `-no-browser` | `false` | Do not auto-launch the browser in desktop mode. |
+
+The environment variables `OPENROUTER_API_KEY`, `OUTPUT_DIR`, `OPENROUTER_MODEL`, `PORT`, `APP_MODE`, `HOST` and `BASE_PATH` can be used instead of the equivalent flags.
 
 ### Server
 
@@ -73,7 +95,7 @@ bash build.sh dist ~/www/magooify
 
 ## Using As a Basis For Your Own Projects
 
-The purpose of this project is to act as a basic starting point for a self-contained "app" that is easy for end users to run and use. It should produce executables able to run on your preferred platform, either as a "desktop app" (a local-only server with a web interface) or as a compact server. If you just compile and run the basic project you will get a minimal application that just reports back the username, useful to test your build process and that any authentication / endpoint routing is working okay.
+The purpose of this project is to act as a basic starting point for a self-contained "app" that is easy for end users to run and use. It should produce executables able to run on your preferred platform, either as a "desktop app" (a local-only server with a web interface) or as a compact server. Compiling and running the project gives you an image capture and processing application that calls OpenRouter and stores the results on disk, useful to test your build process and that any authentication / endpoint routing is working okay.
 
 Extending this project should be a case of cloning the Git repository and adding your own functions to `api.go` and user interface elements to `ui/index.html`, either by hand or by instructing an AI coding agent. An AGENTS.md is included.
 

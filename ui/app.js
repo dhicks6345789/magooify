@@ -3,26 +3,42 @@ document.addEventListener('DOMContentLoaded', () => {
   const userName = document.getElementById('user-name');
   const userMode = document.getElementById('user-mode');
   const connBadge = document.getElementById('conn-badge');
-  const infoMode = document.getElementById('info-mode');
-  const infoUser = document.getElementById('info-user');
-  const infoAuth = document.getElementById('info-auth');
-  const infoGo = document.getElementById('info-go');
-  const infoOs = document.getElementById('info-os');
-  const infoUptime = document.getElementById('info-uptime');
-  const itemsCount = document.getElementById('items-count');
-  const itemsList = document.getElementById('items-list');
-  const itemForm = document.getElementById('item-form');
-  const itemName = document.getElementById('item-name');
-  const apiResponse = document.getElementById('api-response');
+
+  const btnCamera = document.getElementById('btn-camera');
+  const btnUpload = document.getElementById('btn-upload');
+  const fileInput = document.getElementById('file-input');
+  const previewWrap = document.getElementById('preview-wrap');
+  const preview = document.getElementById('preview');
+  const noImage = document.getElementById('no-image');
+  const btnProcess = document.getElementById('btn-process');
+  const processStatus = document.getElementById('process-status');
+
+  const resultPlaceholder = document.getElementById('result-placeholder');
+  const resultBody = document.getElementById('result-body');
+  const resultDescription = document.getElementById('result-description');
+  const resultFilename = document.getElementById('result-filename');
+  const resultTextfile = document.getElementById('result-textfile');
+  const resultModel = document.getElementById('result-model');
+  const resultTime = document.getElementById('result-time');
+
+  const gallery = document.getElementById('gallery');
+  const galleryEmpty = document.getElementById('gallery-empty');
+  const btnRefresh = document.getElementById('btn-refresh');
+
+  const cameraModal = document.getElementById('cameraModal');
+  const cameraVideo = document.getElementById('camera-video');
+  const cameraError = document.getElementById('camera-error');
+  const btnCapture = document.getElementById('btn-capture');
+
+  const MAX_DIM = 1280;
+
+  let cameraStream = null;
+  let currentBlob = null;
 
   function escapeHtml(value) {
     const div = document.createElement('div');
     div.textContent = value == null ? '' : String(value);
     return div.innerHTML;
-  }
-
-  function setResponse(text) {
-    apiResponse.textContent = text;
   }
 
   async function fetchJSON(url, options) {
@@ -39,8 +55,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await fetchJSON('api/v1/user');
       userName.textContent = data.username;
       userMode.textContent = `${data.mode} mode (${data.auth_type})`;
-      infoUser.textContent = data.username;
-      infoAuth.textContent = data.auth_type;
       connBadge.classList.remove('text-bg-danger');
       connBadge.classList.add('text-bg-success');
       connBadge.textContent = 'connected';
@@ -48,90 +62,157 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       userName.textContent = 'Offline / Disconnected';
       userMode.textContent = 'connection failed';
-      infoUser.textContent = '-';
-      infoAuth.textContent = '-';
       connBadge.classList.remove('text-bg-success');
       connBadge.classList.add('text-bg-danger');
       connBadge.textContent = 'disconnected';
     }
   }
 
-  async function loadSystemInfo() {
+  async function startCamera() {
+    stopCamera();
+    cameraError.classList.add('d-none');
+    btnCapture.disabled = true;
     try {
-      const data = await fetchJSON('api/v1/info');
-      infoMode.textContent = data.mode;
-      infoGo.textContent = data.go_version;
-      infoOs.textContent = `${data.os}/${data.arch}`;
-      infoUptime.textContent = data.uptime;
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      cameraVideo.srcObject = cameraStream;
+      await cameraVideo.play().catch(() => {});
+      btnCapture.disabled = false;
     } catch (err) {
-      infoMode.textContent = '-';
-      infoGo.textContent = '-';
-      infoOs.textContent = '-';
-      infoUptime.textContent = '-';
+      cameraError.textContent =
+        'Could not access the camera: ' + err.message + ' You can still use Upload Image instead.';
+      cameraError.classList.remove('d-none');
     }
   }
 
-  async function loadItems() {
-    try {
-      const data = await fetchJSON('api/v1/items');
-      const items = data.items || [];
-      itemsCount.textContent = `${items.length} item${items.length === 1 ? '' : 's'}`;
-      itemsList.innerHTML = '';
-      if (items.length === 0) {
-        itemsList.innerHTML = '<li class="list-group-item text-center text-secondary">No items found. Create one above!</li>';
-        return;
-      }
-      items.forEach((item) => {
-        const li = document.createElement('li');
-        li.className = 'list-group-item d-flex justify-content-between align-items-center';
-        const info = document.createElement('div');
-        info.innerHTML =
-          `<div class="fw-semibold">${escapeHtml(item.name)}</div>` +
-          `<div class="small text-secondary">Created by ${escapeHtml(item.created_by)} at ${escapeHtml(new Date(item.created_at).toLocaleString())}</div>`;
-        const badge = document.createElement('span');
-        badge.className = 'badge text-bg-primary';
-        badge.textContent = `ID: ${item.id}`;
-        li.appendChild(info);
-        li.appendChild(badge);
-        itemsList.appendChild(li);
-      });
-    } catch (err) {
-      itemsList.innerHTML = '<li class="list-group-item text-center text-secondary">Failed to load items.</li>';
+  function stopCamera() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+      cameraStream = null;
+    }
+    if (cameraVideo.srcObject) {
+      cameraVideo.srcObject = null;
     }
   }
 
-  itemForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const name = itemName.value.trim();
-    if (!name) return;
-    try {
-      const data = await fetchJSON('api/v1/items', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      itemName.value = '';
-      setResponse(JSON.stringify(data, null, 2));
-      loadItems();
-    } catch (err) {
-      setResponse(`Error adding item: ${err.message}`);
-    }
+  cameraModal.addEventListener('shown.bs.modal', startCamera);
+  cameraModal.addEventListener('hidden.bs.modal', stopCamera);
+
+  btnCapture.addEventListener('click', () => {
+    if (!cameraStream || cameraVideo.videoWidth === 0) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = cameraVideo.videoWidth;
+    canvas.height = cameraVideo.videoHeight;
+    canvas.getContext('2d').drawImage(cameraVideo, 0, 0);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) setImage(blob, 'camera-capture.jpg');
+      },
+      'image/jpeg',
+      0.92
+    );
+    const modal = bootstrap.Modal.getInstance(cameraModal);
+    if (modal) modal.hide();
   });
 
-  document.querySelectorAll('[data-endpoint]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const endpoint = btn.dataset.endpoint;
-      setResponse('Fetching API response...');
-      try {
-        const data = await fetchJSON(endpoint);
-        setResponse(JSON.stringify(data, null, 2));
-      } catch (err) {
-        setResponse(`Error calling ${endpoint}: ${err.message}`);
-      }
+  btnUpload.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    downscaleImage(file)
+      .then((blob) => setImage(blob, file.name))
+      .catch((err) => {
+        processStatus.textContent = 'Could not read image: ' + err.message;
+      });
+    fileInput.value = '';
+  });
+
+  async function downscaleImage(file) {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext('2d').drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => (blob ? resolve(blob) : reject(new Error('Failed to encode image'))),
+        'image/jpeg',
+        0.92
+      );
     });
+  }
+
+  function setImage(blob, name) {
+    currentBlob = blob;
+    preview.src = URL.createObjectURL(blob);
+    previewWrap.classList.remove('d-none');
+    noImage.classList.add('d-none');
+    btnProcess.disabled = false;
+    processStatus.textContent = `Ready to process: ${name} (${(blob.size / 1024).toFixed(1)} KB).`;
+  }
+
+  btnProcess.addEventListener('click', async () => {
+    if (!currentBlob) return;
+    btnProcess.disabled = true;
+    processStatus.textContent = 'Sending image to OpenRouter for processing...';
+    try {
+      const form = new FormData();
+      form.append('image', currentBlob, 'capture.jpg');
+      const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
+      resultDescription.textContent = data.description;
+      resultFilename.textContent = data.filename;
+      resultTextfile.textContent = data.text_file;
+      resultModel.textContent = data.model;
+      resultTime.textContent = new Date(data.processed_at).toLocaleString();
+      resultPlaceholder.classList.add('d-none');
+      resultBody.classList.remove('d-none');
+      processStatus.textContent = 'Processing complete.';
+      loadGallery();
+    } catch (err) {
+      processStatus.textContent = 'Processing failed: ' + err.message;
+    } finally {
+      btnProcess.disabled = false;
+    }
   });
+
+  async function loadGallery() {
+    try {
+      const data = await fetchJSON('api/v1/images');
+      const images = data.images || [];
+      gallery.innerHTML = '';
+      galleryEmpty.classList.toggle('d-none', images.length > 0);
+      images.forEach((img) => {
+        const col = document.createElement('div');
+        col.className = 'col-sm-6 col-md-4 col-xl-3';
+        const href = 'api/v1/images/' + encodeURIComponent(img.filename);
+        const thumb = img.description
+          ? `<p class="small mb-0 gallery-desc">${escapeHtml(img.description)}</p>`
+          : '';
+        col.innerHTML =
+          `<div class="card h-100 gallery-card">
+             <a href="${href}" target="_blank" rel="noopener" class="gallery-thumb">
+               <img src="${href}" alt="${escapeHtml(img.filename)}" loading="lazy" class="card-img-top" />
+             </a>
+             <div class="card-body">
+               <div class="small text-secondary mb-1 font-monospace text-truncate">${escapeHtml(img.filename)}</div>
+               ${thumb}
+             </div>
+           </div>`;
+        gallery.appendChild(col);
+      });
+    } catch (err) {
+      galleryEmpty.classList.remove('d-none');
+      galleryEmpty.textContent = 'Could not load stored images.';
+    }
+  }
+
+  btnRefresh.addEventListener('click', loadGallery);
 
   loadUser();
-  loadSystemInfo();
-  loadItems();
+  loadGallery();
 });
