@@ -27,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const cameraModal = document.getElementById('cameraModal');
   const cameraVideo = document.getElementById('camera-video');
   const cameraError = document.getElementById('camera-error');
+  const cameraSelect = document.getElementById('camera-select');
   const btnCapture = document.getElementById('btn-capture');
 
   // The model window is roughly 1024x1024; keep the longest side at or below
@@ -37,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentBlob = null;
   let cropRect = null;
   let lastOutputFile = null;
+  let cameraDevices = [];
 
   async function fetchJSON(url, options) {
     const res = await fetch(url, options);
@@ -75,17 +77,53 @@ document.addEventListener('DOMContentLoaded', () => {
     processLabel.textContent = on ? 'Processing...' : 'Process';
   }
 
+  async function populateCameraSelect() {
+    let devices = [];
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch (err) {
+      return;
+    }
+    cameraDevices = devices.filter((d) => d.kind === 'videoinput');
+    const previous = cameraSelect.value;
+    cameraSelect.innerHTML = '';
+    if (cameraDevices.length < 2) {
+      cameraSelect.disabled = true;
+      cameraSelect.innerHTML = '<option value="">Default camera</option>';
+      return;
+    }
+    cameraSelect.disabled = false;
+    cameraDevices.forEach((device, idx) => {
+      const label = device.label || 'Camera ' + (idx + 1);
+      const opt = document.createElement('option');
+      opt.value = device.deviceId;
+      opt.textContent = label;
+      cameraSelect.appendChild(opt);
+    });
+    if (previous && cameraDevices.some((d) => d.deviceId === previous)) {
+      cameraSelect.value = previous;
+    }
+  }
+
   async function startCamera() {
     stopCamera();
     cameraError.classList.add('d-none');
     btnCapture.disabled = true;
+    await populateCameraSelect();
     try {
+      let videoConstraints = { facingMode: 'environment' };
+      if (cameraSelect.value && cameraDevices.some((d) => d.deviceId === cameraSelect.value)) {
+        videoConstraints = { deviceId: { exact: cameraSelect.value } };
+      }
       cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: videoConstraints,
         audio: false,
       });
       cameraVideo.srcObject = cameraStream;
       await cameraVideo.play().catch(() => {});
+      // Device labels are only populated once permission is granted, so refresh
+      // the list now that the stream is running.
+      await populateCameraSelect();
       btnCapture.disabled = false;
     } catch (err) {
       cameraError.textContent =
@@ -93,6 +131,8 @@ document.addEventListener('DOMContentLoaded', () => {
       cameraError.classList.remove('d-none');
     }
   }
+
+  cameraSelect.addEventListener('change', startCamera);
 
   function stopCamera() {
     if (cameraStream) {

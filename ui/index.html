@@ -21,7 +21,7 @@
     <main class="container" style="max-width: 640px">
       <div class="card mb-3">
         <div class="card-body">
-          <button type="button" id="btn-camera" class="btn btn-primary btn-lg w-100" data-bs-toggle="modal" data-bs-target="#cameraModal">Take Photo</button>
+          <button type="button" id="btn-camera" class="btn btn-primary btn-lg w-100" data-bs-toggle="modal" data-bs-target="#cameraModal">Get Photo / Scan</button>
           <input type="file" id="file-input" accept="image/*" hidden />
         </div>
       </div>
@@ -88,10 +88,12 @@
       <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Take a Photo</h5>
+            <h5 class="modal-title">Get Photo / Scan</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body">
+            <label class="form-label small text-secondary" for="camera-select">Input device</label>
+            <select id="camera-select" class="form-select mb-2" disabled></select>
             <video id="camera-video" autoplay playsinline muted class="camera-video"></video>
             <div id="camera-error" class="alert alert-warning d-none mb-0"></div>
           </div>
