@@ -67,6 +67,7 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "Disable automatic browser launch in desktop mode")
 	genDocs := flag.String("gen-docs", "", "Write the Swagger UI documentation page to the given path and exit")
 	openRouterKey := flag.String("openrouter-key", getEnv("OPENROUTER_API_KEY", ""), "OpenRouter API key used to process captured images")
+	managementKey := flag.String("openrouter-management-key", getEnv("OPENROUTER_MANAGEMENT_KEY", ""), "OpenRouter management key used to query account credits; cannot process images")
 	outputDir := flag.String("output-dir", getEnv("OUTPUT_DIR", defaultOutputDir), "Directory where processed images and their descriptions are stored")
 	model := flag.String("model", getEnv("OPENROUTER_MODEL", defaultModel), "OpenRouter model used to process images")
 	promptFile := flag.String("prompt-file", getEnv("PROMPT_FILE", ""), "Path to a file whose text is sent to the model with each image, instead of the embedded PROMPT.md")
@@ -97,6 +98,7 @@ func main() {
 
 	a := newAPI(isServerMode, docsFS)
 	a.openRouterKey = *openRouterKey
+	a.managementKey = *managementKey
 	a.outputDir = *outputDir
 	a.model = *model
 	a.promptFile = *promptFile
@@ -114,6 +116,11 @@ func main() {
 		log.Printf("OpenRouter: configured (model %s)", a.model)
 	} else {
 		log.Printf("OpenRouter: NOT configured (use -openrouter-key)")
+	}
+	if a.managementKey != "" {
+		log.Printf("Credits   : management key configured (use -openrouter-management-key to change)")
+	} else {
+		log.Printf("Credits   : NOT configured (use -openrouter-management-key)")
 	}
 	log.Printf("Output dir: %s", a.outputDir)
 	if a.promptFile != "" {
@@ -236,6 +243,7 @@ func buildHandler(a *api, basePaths []string) http.Handler {
 	mux.HandleFunc("GET /api/v1/items", a.listItems)
 	mux.HandleFunc("POST /api/v1/items", a.createItem)
 	mux.HandleFunc("POST /api/v1/process", a.processImage)
+	mux.HandleFunc("GET /api/v1/credits", a.credits)
 	mux.HandleFunc("GET /api/v1/images", a.listImages)
 	mux.HandleFunc("GET /api/v1/images/{filename}", a.getImage)
 

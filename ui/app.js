@@ -1,5 +1,14 @@
 document.addEventListener('DOMContentLoaded', () => {
   const connBadge = document.getElementById('conn-badge');
+  const creditInfo = document.getElementById('credit-info');
+
+  // OpenRouter balances are US dollars; format them with the browser's locale
+  // so separators, symbol placement and formatting follow local conventions.
+  const currencyFmt = new Intl.NumberFormat(navigator.language || 'en', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 4,
+  });
 
   const fileInput = document.getElementById('file-input');
   const previewWrap = document.getElementById('preview-wrap');
@@ -69,6 +78,20 @@ document.addEventListener('DOMContentLoaded', () => {
         promptText.value = data.prompt || '';
       })
       .catch(() => {});
+  }
+
+  function loadCredits() {
+    fetchJSON('api/v1/credits')
+      .then((data) => {
+        const parts = ['Session: ' + currencyFmt.format(data.session_cost || 0)];
+        if (data.credits_available) {
+          parts.unshift('Credits: ' + currencyFmt.format(data.remaining_credits || 0));
+        }
+        creditInfo.textContent = parts.join(' · ');
+      })
+      .catch(() => {
+        creditInfo.textContent = '';
+      });
   }
 
   function setProcessing(on) {
@@ -444,6 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
       resultCard.classList.remove('d-none');
       resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
       processStatus.textContent = 'Done';
+      loadCredits();
     } catch (err) {
       processStatus.textContent = 'Failed: ' + err.message;
     } finally {
@@ -469,4 +493,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   checkConnection();
   loadPrompt();
+  loadCredits();
 });

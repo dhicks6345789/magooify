@@ -1030,3 +1030,198 @@ func TestOpenRouterUpstreamFailure(t *testing.T) {
 		t.Errorf("error = %q, want upstream failure message", resp.Error)
 	}
 }
+
+func TestCreditsEndpointWithoutManagementKey(t *testing.T) {
+	a := newAPI(false, docsFS)
+	req := httptest.NewRequest("GET", "/api/v1/credits", nil)
+	rr := httptest.NewRecorder()
+
+	a.credits(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var resp CreditsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.CreditsAvailable {
+		t.Errorf("credits_available = true, want false without a management key")
+	}
+	if resp.RemainingCredits != 0 || resp.TotalCredits != 0 || resp.TotalUsage != 0 {
+		t.Errorf("balance fields should be zero without a management key, got %+v", resp)
+	}
+}
+
+func TestCreditsEndpointWithManagementKey(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/credits" {
+			t.Errorf("request path = %q, want /api/v1/credits", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer mgmt-test-key" {
+			t.Errorf("authorization = %q, want the management key", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"total_credits":100.5,"total_usage":25.75}}`)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.managementKey = "mgmt-test-key"
+	a.creditsURL = fake.URL + "/api/v1/credits"
+
+	remaining, total, used, ok := a.fetchCredits()
+	if !ok {
+		t.Fatalf("fetchCredits returned ok=false, want true")
+	}
+	if total != 100.5 {
+		t.Errorf("total = %v, want 100.5", total)
+	}
+	if used != 25.75 {
+		t.Errorf("usage = %v, want 25.75", used)
+	}
+	if remaining != 74.75 {
+		t.Errorf("remaining = %v, want 74.75", remaining)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/credits", nil)
+	rr := httptest.NewRecorder()
+	a.credits(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var resp CreditsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.CreditsAvailable {
+		t.Errorf("credits_available = false, want true")
+	}
+	if resp.RemainingCredits != 74.75 {
+		t.Errorf("remaining_credits = %v, want 74.75", resp.RemainingCredits)
+	}
+}
+
+func TestCreditsEndpointManagementKeyFailsGracefully(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"invalid management key"}`))
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.managementKey = "mgmt-bad-key"
+	a.creditsURL = fake.URL + "/api/v1/credits"
+
+	req := httptest.NewRequest("GET", "/api/v1/credits", nil)
+	rr := httptest.NewRecorder()
+	a.credits(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (balance errors are reported as unavailable)", rr.Code, http.StatusOK)
+	}
+	var resp CreditsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.CreditsAvailable {
+		t.Errorf("credits_available = true, want false when the credits query fails")
+	}
+}
+
+func TestProcessImageReturnsAndAccumulatesCost(t *testing.T) {
+	processedPNG := base64.StdEncoding.EncodeToString(miniPNG)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30,"cost":0.000123}}`, processedPNG)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	process := func() ProcessImageResponse {
+		req := httptest.NewRequest("POST", "/api/v1/process",
+			strings.NewReader(`{"image":"data:image/png;base64,`+base64.StdEncoding.EncodeToString(miniPNG)+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		a.processImage(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+		}
+		var resp ProcessImageResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to parse response: %v", err)
+		}
+		return resp
+	}
+
+	first := process()
+	if first.Cost != 0.000123 {
+		t.Errorf("cost = %v, want 0.000123", first.Cost)
+	}
+	if first.SessionCost != 0.000123 {
+		t.Errorf("session_cost after one request = %v, want 0.000123", first.SessionCost)
+	}
+
+	second := process()
+	if second.Cost != 0.000123 {
+		t.Errorf("cost = %v, want 0.000123", second.Cost)
+	}
+	if second.SessionCost != 0.000246 {
+		t.Errorf("session_cost after two requests = %v, want 0.000246", second.SessionCost)
+	}
+}
+
+func TestProcessImageNoReportedCost(t *testing.T) {
+	processedPNG := base64.StdEncoding.EncodeToString(miniPNG)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`, processedPNG)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	req := httptest.NewRequest("POST", "/api/v1/process",
+		strings.NewReader(`{"image":"data:image/png;base64,`+base64.StdEncoding.EncodeToString(miniPNG)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Cost != 0 {
+		t.Errorf("cost = %v, want 0 when OpenRouter reports no cost", resp.Cost)
+	}
+}
+
+func TestExtractCost(t *testing.T) {
+	hdr := http.Header{"X-Request-Cost": []string{"0.5"}}
+
+	// usage.cost in the body wins over the header.
+	if got := extractCost([]byte(`{"usage":{"cost":0.123}}`), hdr); got != 0.123 {
+		t.Errorf("extractCost(body) = %v, want 0.123", got)
+	}
+	// The header is used when the body has no usage.cost.
+	if got := extractCost([]byte(`{"usage":{}}`), hdr); got != 0.5 {
+		t.Errorf("extractCost(header) = %v, want 0.5", got)
+	}
+	// Nothing reported anywhere yields zero.
+	if got := extractCost([]byte(`{"choices":[]}`), http.Header{}); got != 0 {
+		t.Errorf("extractCost(none) = %v, want 0", got)
+	}
+	// Malformed header is ignored.
+	if got := extractCost([]byte(`{}`), http.Header{"X-Request-Cost": []string{"oops"}}); got != 0 {
+		t.Errorf("extractCost(malformed) = %v, want 0", got)
+	}
+}

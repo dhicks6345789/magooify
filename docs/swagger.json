@@ -7,6 +7,23 @@
         "version": "1.0.0"
     },
     "paths": {
+        "/api/v1/credits": {
+            "get": {
+                "description": "Returns the remaining OpenRouter credits for the account (when a management key is configured) and the session's accumulated spend in US dollars.",
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Get Credits",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CreditsResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/health": {
             "get": {
                 "description": "Returns operational status of the service.",
@@ -258,6 +275,26 @@
                 }
             }
         },
+        "CreditsResponse": {
+            "type": "object",
+            "properties": {
+                "credits_available": {
+                    "type": "boolean"
+                },
+                "remaining_credits": {
+                    "type": "number"
+                },
+                "session_cost": {
+                    "type": "number"
+                },
+                "total_credits": {
+                    "type": "number"
+                },
+                "total_usage": {
+                    "type": "number"
+                }
+            }
+        },
         "ErrorResponse": {
             "type": "object",
             "properties": {
@@ -322,6 +359,9 @@
         "ProcessImageResponse": {
             "type": "object",
             "properties": {
+                "cost": {
+                    "type": "number"
+                },
                 "filename": {
                     "type": "string",
                     "example": "img-20260806-123000-a1b2c3d4.jpg"
@@ -332,6 +372,9 @@
                 },
                 "processed_at": {
                     "type": "string"
+                },
+                "session_cost": {
+                    "type": "number"
                 }
             }
         },

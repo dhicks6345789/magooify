@@ -34,6 +34,7 @@ Optional flags:
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the image endpoint reports that OpenRouter is not configured. |
+| `-openrouter-management-key` | (unset) | OpenRouter management key used to query the account balance. Optional; without it the UI shows only the session's spend. Cannot be used to process images. |
 | `-output-dir` | `processed` | Folder where processed images are stored. |
 | `-model` | `google/gemini-3.1-flash-lite-image` | OpenRouter model used to process the images (any image-capable model). |
 | `-prompt-file` | (unset) | Path to a file whose text is sent to the model with each image, instead of the embedded `PROMPT.md`. |
@@ -43,7 +44,7 @@ Optional flags:
 | `-base-path` | (unset) | Reverse-proxy sub-path prefix, e.g. `/magooify`. |
 | `-no-browser` | `false` | Do not auto-launch the browser in desktop mode. |
 
-The environment variables `OPENROUTER_API_KEY`, `OUTPUT_DIR`, `OPENROUTER_MODEL`, `PROMPT_FILE`, `PORT`, `APP_MODE`, `HOST` and `BASE_PATH` can be used instead of the equivalent flags.
+The environment variables `OPENROUTER_API_KEY`, `OPENROUTER_MANAGEMENT_KEY`, `OUTPUT_DIR`, `OPENROUTER_MODEL`, `PROMPT_FILE`, `PORT`, `APP_MODE`, `HOST` and `BASE_PATH` can be used instead of the equivalent flags.
 
 ## Customising the Processing Instructions
 
@@ -56,6 +57,10 @@ To use a different prompt without rebuilding, point the `-prompt-file` option at
 ```
 
 The file's text is read from disk on each use; if it can't be read or is empty, the embedded `PROMPT.md` text (or the built-in default) is used instead.
+
+## Tracking Spend
+
+The UI shows the total cost of the current session (in US dollars, formatted to your locale) in the top bar. When you also supply an OpenRouter *management* key with `-openrouter-management-key` (or the `OPENROUTER_MANAGEMENT_KEY` environment variable), the remaining account balance is shown alongside it. Management keys are administrative-only: they can query your credits but cannot process images, so both keys are needed to see the balance. If the management key is missing or the query fails, the balance is simply hidden and only the session cost is shown.
 
 ### Server
 

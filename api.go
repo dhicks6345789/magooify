@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ import (
 
 const (
 	openRouterDefaultURL = "https://openrouter.ai/api/v1/chat/completions"
+	openRouterCreditsURL = "https://openrouter.ai/api/v1/credits"
 	defaultModel         = "google/gemini-3.1-flash-lite-image"
 	defaultOutputDir     = "processed"
 	fallbackPrompt       = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
@@ -110,11 +112,27 @@ type ProcessImageRequest struct {
 	Output   string `json:"output" example:"img-20260806-123000-a1b2c3d4.jpg"`
 }
 
-// ProcessImageResponse describes the outcome of processing an image.
+// ProcessImageResponse describes the outcome of processing an image. Cost is
+// the amount this request billed to the OpenRouter account in US dollars (0
+// when OpenRouter did not report a cost), SessionCost is the total spent since
+// the application started.
 type ProcessImageResponse struct {
 	Filename    string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
 	Model       string    `json:"model" example:"google/gemini-3.1-flash-lite-image"`
 	ProcessedAt time.Time `json:"processed_at"`
+	Cost        float64   `json:"cost"`
+	SessionCost float64   `json:"session_cost"`
+}
+
+// CreditsResponse describes the OpenRouter account balance and the spend since
+// the application started. CreditsAvailable is false when no OpenRouter
+// management key is configured, in which case the balance fields are zero.
+type CreditsResponse struct {
+	CreditsAvailable bool    `json:"credits_available"`
+	TotalCredits     float64 `json:"total_credits,omitempty"`
+	TotalUsage       float64 `json:"total_usage,omitempty"`
+	RemainingCredits float64 `json:"remaining_credits,omitempty"`
+	SessionCost      float64 `json:"session_cost"`
 }
 
 // StoredImage describes a processed image stored on the file system.
@@ -150,11 +168,14 @@ type api struct {
 	docsFS         fs.FS
 	docsFileServer http.Handler
 	openRouterKey  string
+	managementKey  string
 	openRouterURL  string
+	creditsURL     string
 	model          string
 	outputDir      string
 	promptFile     string
 	httpClient     *http.Client
+	sessionCost    float64
 }
 
 // @title Magooify API
@@ -175,6 +196,7 @@ func newAPI(isServerMode bool, docsFS fs.FS) *api {
 		nextID:        2,
 		docsFS:        docsFS,
 		openRouterURL: openRouterDefaultURL,
+		creditsURL:    openRouterCreditsURL,
 		model:         defaultModel,
 		outputDir:     defaultOutputDir,
 		httpClient:    &http.Client{Timeout: 120 * time.Second},
@@ -270,6 +292,74 @@ func (a *api) info(w http.ResponseWriter, r *http.Request) {
 		"arch":       runtime.GOARCH,
 		"uptime":     time.Since(a.startTime).Truncate(time.Second).String(),
 	})
+}
+
+// credits returns the OpenRouter account balance (remaining credits) and the
+// total spend accumulated during this application session. The balance is only
+// available when an OpenRouter management key is configured; otherwise the
+// response reports credits_available: false and the session cost is returned
+// on its own.
+// @Summary Get Credits
+// @Description Returns the remaining OpenRouter credits for the account (when a management key is configured) and the session's accumulated spend in US dollars.
+// @Produce json
+// @Success 200 {object} CreditsResponse
+// @Router /api/v1/credits [get]
+func (a *api) credits(w http.ResponseWriter, r *http.Request) {
+	remaining, total, used, ok := a.fetchCredits()
+
+	a.mu.RLock()
+	session := a.sessionCost
+	a.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(CreditsResponse{
+		CreditsAvailable: ok,
+		TotalCredits:     total,
+		TotalUsage:       used,
+		RemainingCredits: remaining,
+		SessionCost:      session,
+	})
+}
+
+// fetchCredits asks the OpenRouter API for the account's total credits and
+// usage. It returns the remaining balance, the total credits, the usage and
+// whether the query succeeded. When no management key is configured, or the
+// OpenRouter request fails for any reason, ok is false so callers can report
+// the balance as unavailable rather than exposing an error to the UI.
+func (a *api) fetchCredits() (remaining, total, used float64, ok bool) {
+	if a.managementKey == "" {
+		return 0, 0, 0, false
+	}
+
+	req, err := http.NewRequest(http.MethodGet, a.creditsURL, nil)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	req.Header.Set("Authorization", "Bearer "+a.managementKey)
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, 0, 0, false
+	}
+
+	var body struct {
+		Data struct {
+			TotalCredits float64 `json:"total_credits"`
+			TotalUsage   float64 `json:"total_usage"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return 0, 0, 0, false
+	}
+
+	used = body.Data.TotalUsage
+	total = body.Data.TotalCredits
+	remaining = total - used
+	return remaining, total, used, true
 }
 
 // prompt returns the current processing prompt so the UI can show and let the
@@ -377,7 +467,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	processed, err := a.processWithOpenRouter(pl.img, pl.contentType, pl.prompt)
+	processed, cost, err := a.processWithOpenRouter(pl.img, pl.contentType, pl.prompt)
 	if err != nil {
 		code := http.StatusBadGateway
 		if errors.Is(err, errOpenRouterNotConfigured) {
@@ -386,6 +476,11 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		a.jsonError(w, code, err.Error())
 		return
 	}
+
+	a.mu.Lock()
+	a.sessionCost += cost
+	sessionCost := a.sessionCost
+	a.mu.Unlock()
 
 	imageFile, err := a.storeResult(processed, pl.output)
 	if err != nil {
@@ -398,6 +493,8 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		Filename:    imageFile,
 		Model:       a.model,
 		ProcessedAt: time.Now().UTC(),
+		Cost:        cost,
+		SessionCost: sessionCost,
 	})
 }
 
@@ -452,11 +549,12 @@ func readImagePayload(r *http.Request) (*imagePayload, error) {
 }
 
 // processWithOpenRouter sends the image to the configured OpenRouter image
-// model and returns the processed image returned by the model. When prompt is
-// empty the configured prompt is used.
-func (a *api) processWithOpenRouter(img []byte, contentType, prompt string) ([]byte, error) {
+// model and returns the processed image returned by the model, together with
+// the cost of the request in US dollars (0 when OpenRouter did not report
+// one). When prompt is empty the configured prompt is used.
+func (a *api) processWithOpenRouter(img []byte, contentType, prompt string) ([]byte, float64, error) {
 	if a.openRouterKey == "" {
-		return nil, errOpenRouterNotConfigured
+		return nil, 0, errOpenRouterNotConfigured
 	}
 	if strings.TrimSpace(prompt) == "" {
 		prompt = a.processPrompt()
@@ -478,37 +576,61 @@ func (a *api) processWithOpenRouter(img []byte, contentType, prompt string) ([]b
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to build OpenRouter request: %w", err)
+		return nil, 0, fmt.Errorf("Failed to build OpenRouter request: %w", err)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, a.openRouterURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create OpenRouter request: %w", err)
+		return nil, 0, fmt.Errorf("Failed to create OpenRouter request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("OpenRouter request failed: %w", err)
+		return nil, 0, fmt.Errorf("OpenRouter request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxOpenRouterBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("Failed to read OpenRouter response: %w", err)
+		return nil, 0, fmt.Errorf("Failed to read OpenRouter response: %w", err)
 	}
 	if len(respBody) > maxOpenRouterBytes {
-		return nil, errors.New("OpenRouter response exceeded the 25 MB size limit")
+		return nil, 0, errors.New("OpenRouter response exceeded the 25 MB size limit")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("OpenRouter returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, 0, fmt.Errorf("OpenRouter returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	if len(respBody) == 0 {
-		return nil, errors.New("OpenRouter returned an empty response (HTTP 200); the model may have failed to produce an image. Please try again")
+		return nil, 0, errors.New("OpenRouter returned an empty response (HTTP 200); the model may have failed to produce an image. Please try again")
 	}
 
-	return extractImageFromResponse(respBody)
+	img, err = extractImageFromResponse(respBody)
+	if err != nil {
+		return nil, 0, err
+	}
+	return img, extractCost(respBody, resp.Header), nil
+}
+
+// extractCost returns the US-dollar cost of an OpenRouter chat completion
+// request, taken from the usage.cost field of the response body and falling
+// back to the X-Request-Cost response header when the body does not carry it.
+func extractCost(respBody []byte, hdr http.Header) float64 {
+	var chat struct {
+		Usage struct {
+			Cost *float64 `json:"cost"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(respBody, &chat) == nil && chat.Usage.Cost != nil {
+		return *chat.Usage.Cost
+	}
+	if v := hdr.Get("X-Request-Cost"); v != "" {
+		if c, err := strconv.ParseFloat(v, 64); err == nil {
+			return c
+		}
+	}
+	return 0
 }
 
 // extractImageFromResponse pulls the processed image out of an OpenRouter
