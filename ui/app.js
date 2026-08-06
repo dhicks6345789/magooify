@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
   const connBadge = document.getElementById('conn-badge');
 
-  const btnUpload = document.getElementById('btn-upload');
   const fileInput = document.getElementById('file-input');
   const previewWrap = document.getElementById('preview-wrap');
   const preview = document.getElementById('preview');
@@ -100,8 +99,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const modal = bootstrap.Modal.getInstance(cameraModal);
     if (modal) modal.hide();
   });
-
-  btnUpload.addEventListener('click', () => fileInput.click());
 
   dropZone.addEventListener('click', () => fileInput.click());
 
