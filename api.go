@@ -141,12 +141,14 @@ type CreditsResponse struct {
 
 // ModelInfo describes an OpenRouter model that can process an image and return
 // a processed image, together with the cost of a single processing run.
-// OpenRouter publishes exact per-image prices for some models (via
-// pricing.image for image input and pricing.image_output for a generated
-// image); where no such price exists the cost is estimated from the per-token
-// rates. InputImageCostKnown and OutputImageCostKnown report which of the two
-// costs is an exact published price rather than an estimate.
-// EstimatedImageCost is the sum used for a single image-in/image-out run.
+// OpenRouter publishes exact per-image prices for a few models via the
+// display_pricing entries that bill by the image (unitLabel "/image"); for
+// all other models the image/image_output fields are per-image-token rates, so
+// the per-image cost is estimated from those rates (using imageInputTokenEstimate
+// and imageOutputTokenEstimate). InputImageCostKnown and OutputImageCostKnown
+// report which of the two costs is an exact published per-image price rather
+// than an estimate. EstimatedImageCost is the sum used for a single
+// image-in/image-out run.
 type ModelInfo struct {
 	ID                   string  `json:"id" example:"google/gemini-3.1-flash-lite-image"`
 	Name                 string  `json:"name" example:"Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"`
@@ -409,14 +411,29 @@ const (
 	imageOutputTokenEstimate = 1290.0
 )
 
+// openRouterDisplayPrice mirrors one entry of OpenRouter's display_pricing
+// array. The entry describes how a line item is billed: kind is "token" or
+// "unit", price is the USD rate before displayMultiplier is applied, and
+// unitLabel states the billing unit (e.g. "/M tokens", "/image", "/request").
+// An entry with kind "unit" and unitLabel "/image" is a true per-image price;
+// token-billed entries (unitLabel "/M tokens") mean the image/image_output
+// fields are per-image-token rates, not per-image prices.
+type openRouterDisplayPrice struct {
+	Kind      string `json:"kind"`
+	SKULabel  string `json:"sku_label"`
+	Price     string `json:"price"`
+	UnitLabel string `json:"unitLabel"`
+}
+
 // openRouterPricing mirrors the pricing fields OpenRouter publishes for a
 // model. All values are USD strings. Fields such as "overrides" are ignored.
 type openRouterPricing struct {
-	Prompt      string `json:"prompt"`
-	Completion  string `json:"completion"`
-	Request     string `json:"request"`
-	Image       string `json:"image"`
-	ImageOutput string `json:"image_output"`
+	Prompt        string                   `json:"prompt"`
+	Completion    string                   `json:"completion"`
+	Request       string                   `json:"request"`
+	Image         string                   `json:"image"`
+	ImageOutput   string                   `json:"image_output"`
+	DisplayPrices []openRouterDisplayPrice `json:"display_pricing"`
 }
 
 // openRouterModel mirrors the subset of OpenRouter's model object consumed by
@@ -544,8 +561,10 @@ func (a *api) fetchModels() ([]ModelInfo, error) {
 
 // buildModelList converts OpenRouter's raw model objects into the ModelInfo
 // view, keeping only models that accept image input and return a processed
-// image, and computing a per-image cost for each. Exact published prices take
-// precedence; otherwise the cost is estimated from the per-token rates using
+// image, and computing a per-image cost for each. OpenRouter's image/image_output
+// pricing fields are per-image-token rates for most models, so a true per-image
+// price (from a display_pricing entry billed per image) takes precedence; the
+// cost is otherwise estimated from the per-token rates using
 // imageInputTokenEstimate and imageOutputTokenEstimate.
 func buildModelList(rows []openRouterModel) []ModelInfo {
 	models := make([]ModelInfo, 0, len(rows))
@@ -567,16 +586,25 @@ func buildModelList(rows []openRouterModel) []ModelInfo {
 			RequestCost:          request,
 		}
 
-		if img := parsePrice(m.Pricing.Image); img > 0 {
-			mi.InputImageCost = img
+		// Input image cost: exact when OpenRouter publishes a per-image input
+		// price, otherwise the image field is a per-image-token rate so scale
+		// it by the number of tokens a typical uploaded image consumes.
+		if p, ok := perImagePrice(m.Pricing.DisplayPrices, "Image Input"); ok {
+			mi.InputImageCost = p
 			mi.InputImageCostKnown = true
+		} else if img := parsePrice(m.Pricing.Image); img > 0 {
+			mi.InputImageCost = img * imageInputTokenEstimate
 		} else {
 			mi.InputImageCost = prompt * imageInputTokenEstimate
 		}
 
-		if img := parsePrice(m.Pricing.ImageOutput); img > 0 {
-			mi.OutputImageCost = img
+		// Output image cost: exact when OpenRouter publishes a per-image output
+		// price, otherwise estimated from the per-image-token output rate.
+		if p, ok := perImagePrice(m.Pricing.DisplayPrices, "Image Output"); ok {
+			mi.OutputImageCost = p
 			mi.OutputImageCostKnown = true
+		} else if img := parsePrice(m.Pricing.ImageOutput); img > 0 {
+			mi.OutputImageCost = img * imageOutputTokenEstimate
 		} else {
 			mi.OutputImageCost = completion * imageOutputTokenEstimate
 		}
@@ -585,6 +613,24 @@ func buildModelList(rows []openRouterModel) []ModelInfo {
 		models = append(models, mi)
 	}
 	return models
+}
+
+// perImagePrice looks up the true per-image price for the given SKU label in
+// OpenRouter's display_pricing entries. Only entries billed per image (kind
+// "unit" with unitLabel "/image") represent an exact per-image price; token-
+// billed entries are ignored. ok is false when no such price is published.
+func perImagePrice(prices []openRouterDisplayPrice, label string) (price float64, ok bool) {
+	for _, dp := range prices {
+		if !strings.EqualFold(dp.SKULabel, label) ||
+			!strings.EqualFold(dp.Kind, "unit") ||
+			!strings.EqualFold(strings.TrimSpace(dp.UnitLabel), "/image") {
+			continue
+		}
+		if p := parsePrice(dp.Price); p > 0 {
+			return p, true
+		}
+	}
+	return 0, false
 }
 
 // parsePrice converts an OpenRouter price string to its float64 value. OpenRouter

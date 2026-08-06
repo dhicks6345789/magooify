@@ -1229,7 +1229,8 @@ func TestExtractCost(t *testing.T) {
 
 func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 	rows := []openRouterModel{
-		// Image in, image out, with exact per-image prices published.
+		// Image in, image out, with exact per-image prices published via
+		// display_pricing (billed per image, like Recraft's image models).
 		{
 			ID:   "google/exact-img-model",
 			Name: "Exact Image Model",
@@ -1242,6 +1243,10 @@ func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 				Completion:  "0.0000015",
 				Image:       "0.0004",
 				ImageOutput: "0.03",
+				DisplayPrices: []openRouterDisplayPrice{
+					{Kind: "unit", SKULabel: "Image Input", Price: "0.0004", UnitLabel: "/image"},
+					{Kind: "unit", SKULabel: "Image Output", Price: "0.03", UnitLabel: "/image"},
+				},
 			},
 		},
 		// Image in, text out, billed per token only.
@@ -1254,7 +1259,8 @@ func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 			}{Input: []string{"text", "image"}, Output: []string{"text"}},
 			Pricing: openRouterPricing{Prompt: "0.0000025", Completion: "0.00001"},
 		},
-		// Image in, image out, but no per-image output price published.
+		// Image in, image out, but no per-image price published; the cost is
+		// estimated from the per-token rates.
 		{
 			ID:   "meta/image-token-model",
 			Name: "Image Token Model",
@@ -1320,7 +1326,7 @@ func TestModelsEndpointAndCache(t *testing.T) {
 	body := `{"data":[
 		{"id":"google/gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite",
 		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
-		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.03"}},
+		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.00003"}},
 		{"id":"openai/gpt-4o","name":"GPT-4o",
 		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
 		 "pricing":{"prompt":"0.0000025","completion":"0.00001"}},
@@ -1360,8 +1366,9 @@ func TestModelsEndpointAndCache(t *testing.T) {
 	if len(resp.Models) != 2 {
 		t.Fatalf("got %d models, want 2 (text-only filtered out)", len(resp.Models))
 	}
-	// The cheaper model (0.0169, per-token estimate) sorts before the exact-priced
-	// image-output model (0.0304, which pays for a generated image).
+	// The cheaper model (0.0169, per-token estimate) sorts before the
+	// image-output model (0.0391, which pays for a generated image at
+	// 0.00003/token).
 	if resp.Models[0].ID != "openai/gpt-4o" {
 		t.Errorf("models[0] = %q, want the cheaper model first", resp.Models[0].ID)
 	}
@@ -1439,12 +1446,13 @@ func TestModelsEndpointPaginates(t *testing.T) {
 	page1 := `{"data":[
 		{"id":"google/gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite",
 		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
-		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.03"}}
+		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.00003"}}
 	],"links":{"next":"__NEXT__"}}`
 	page2 := `{"data":[
 		{"id":"recraft/recraft-v4.1-pro-vector","name":"Recraft V4.1 Pro Vector",
 		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image"]},
-		 "pricing":{"prompt":"0","completion":"0","image_output":"0.0000718562874251497"}}
+		 "pricing":{"prompt":"0","completion":"0","image_output":"0.0000718562874251497",
+		            "display_pricing":[{"kind":"unit","sku_label":"Image Output","price":"0.3","displayMultiplier":1,"unitLabel":"/image"}]}}
 	],"links":{"next":""}}`
 
 	var fake *httptest.Server
@@ -1483,9 +1491,43 @@ func TestModelsEndpointPaginates(t *testing.T) {
 	ids := map[string]bool{}
 	for _, m := range resp.Models {
 		ids[m.ID] = true
+		if m.ID == "recraft/recraft-v4.1-pro-vector" {
+			if m.OutputImageCost != 0.3 || !m.OutputImageCostKnown {
+				t.Errorf("recraft output cost = %v (known=%v), want the exact $0.30/image from display_pricing",
+					m.OutputImageCost, m.OutputImageCostKnown)
+			}
+		}
 	}
 	if !ids["recraft/recraft-v4.1-pro-vector"] || !ids["google/gemini-3.1-flash-lite-image"] {
 		t.Errorf("models = %v, want both page models", ids)
+	}
+}
+
+func TestPerImagePrice(t *testing.T) {
+	prices := []openRouterDisplayPrice{
+		{Kind: "token", SKULabel: "Image Output", Price: "0.00003", UnitLabel: "/M tokens"},
+		{Kind: "unit", SKULabel: "Image Output", Price: "0.3", UnitLabel: "/image"},
+		{Kind: "unit", SKULabel: "Web Search", Price: "0.014", UnitLabel: "/request"},
+	}
+
+	if p, ok := perImagePrice(prices, "Image Output"); !ok || p != 0.3 {
+		t.Errorf("perImagePrice(Image Output) = %v/%v, want 0.3/true", p, ok)
+	}
+	// The token-billed entry must be ignored.
+	if p, ok := perImagePrice([]openRouterDisplayPrice{prices[0]}, "Image Output"); ok {
+		t.Errorf("perImagePrice(token entry) = %v/%v, want 0/false", p, ok)
+	}
+	// A non-image unit entry must not match.
+	if p, ok := perImagePrice([]openRouterDisplayPrice{prices[2]}, "Image Output"); ok {
+		t.Errorf("perImagePrice(non-image) = %v/%v, want 0/false", p, ok)
+	}
+	// No entry at all.
+	if p, ok := perImagePrice(nil, "Image Output"); ok {
+		t.Errorf("perImagePrice(none) = %v/%v, want 0/false", p, ok)
+	}
+	// Label matching is case-insensitive.
+	if p, ok := perImagePrice([]openRouterDisplayPrice{{Kind: "unit", SKULabel: "image output", Price: "0.25", UnitLabel: "/image"}}, "Image Output"); !ok || p != 0.25 {
+		t.Errorf("perImagePrice(case) = %v/%v, want 0.25/true", p, ok)
 	}
 }
 
