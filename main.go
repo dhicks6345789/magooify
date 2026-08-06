@@ -232,6 +232,7 @@ func buildHandler(a *api, basePaths []string) http.Handler {
 	mux.HandleFunc("/api/v1/health", a.health)
 	mux.HandleFunc("/api/v1/user", a.user)
 	mux.HandleFunc("/api/v1/info", a.info)
+	mux.HandleFunc("/api/v1/prompt", a.prompt)
 	mux.HandleFunc("GET /api/v1/items", a.listItems)
 	mux.HandleFunc("POST /api/v1/items", a.createItem)
 	mux.HandleFunc("POST /api/v1/process", a.processImage)

@@ -250,6 +250,7 @@ func TestServeAllRoutes(t *testing.T) {
 		{"/app.js", http.StatusOK, "text/javascript", "DOMContentLoaded"},
 		{"/api/v1/user", http.StatusOK, "application/json", `"auth_type"`},
 		{"/api/v1/health", http.StatusOK, "application/json", `"ok"`},
+		{"/api/v1/prompt", http.StatusOK, "application/json", `"prompt"`},
 		{"/docs/api", http.StatusOK, "text/html", "swagger-ui"},
 		{"/docs/swagger.json", http.StatusOK, "application/json", `"swagger"`},
 		{"/docs/swagger-ui/swagger-ui.css", http.StatusOK, "text/css", "swagger-ui"},
@@ -772,6 +773,143 @@ func TestProcessImageJSONPayload(t *testing.T) {
 	}
 	if resp.Model != defaultModel {
 		t.Errorf("model = %q, want %q", resp.Model, defaultModel)
+	}
+}
+
+func TestPromptEndpoint(t *testing.T) {
+	a := newAPI(false, docsFS)
+	req := httptest.NewRequest("GET", "/api/v1/prompt", nil)
+	rr := httptest.NewRecorder()
+
+	a.prompt(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if strings.TrimSpace(resp["prompt"]) != strings.TrimSpace(promptMD) {
+		t.Errorf("prompt = %q, want PROMPT.md text", resp["prompt"])
+	}
+}
+
+func TestProcessImageCustomPrompt(t *testing.T) {
+	processedPNG := base64.StdEncoding.EncodeToString(miniPNG)
+	var gotPrompt string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode OpenRouter request: %v", err)
+		}
+		messages := body["messages"].([]any)
+		content := messages[0].(map[string]any)["content"].([]any)
+		gotPrompt = content[0].(map[string]any)["text"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`, processedPNG)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(miniPNG)
+	mw.WriteField("prompt", "Clean the scan and sharpen the text")
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if gotPrompt != "Clean the scan and sharpen the text" {
+		t.Errorf("prompt sent to model = %q, want the custom prompt", gotPrompt)
+	}
+}
+
+func TestProcessImageOverwriteOutput(t *testing.T) {
+	processedPNG := base64.StdEncoding.EncodeToString(miniPNG)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`, processedPNG)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	// First process without an output name generates a fresh filename.
+	req := httptest.NewRequest("POST", "/api/v1/process",
+		strings.NewReader(`{"image":"data:image/png;base64,`+base64.StdEncoding.EncodeToString(miniPNG)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !strings.HasSuffix(resp.Filename, ".png") {
+		t.Fatalf("filename = %q, want a .png name", resp.Filename)
+	}
+
+	// Reprocess with the same output name: the file must be replaced, not
+	// duplicated.
+	payload := fmt.Sprintf(`{"image":"data:image/png;base64,%s","output":%q}`,
+		base64.StdEncoding.EncodeToString(miniPNG), resp.Filename)
+	req2 := httptest.NewRequest("POST", "/api/v1/process", strings.NewReader(payload))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	a.processImage(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr2.Code, http.StatusOK, rr2.Body.String())
+	}
+	var resp2 ProcessImageResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp2.Filename != resp.Filename {
+		t.Errorf("filename = %q, want %q", resp2.Filename, resp.Filename)
+	}
+
+	entries, _ := os.ReadDir(a.outputDir)
+	if len(entries) != 1 {
+		t.Fatalf("output dir has %d files, want 1 (reprocessed image replaces the original)", len(entries))
+	}
+	if entries[0].Name() != resp.Filename {
+		t.Errorf("stored file = %q, want %q", entries[0].Name(), resp.Filename)
+	}
+}
+
+func TestStoreResultRejectsTraversalOutput(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	for _, out := range []string{"../evil.png", "a/b.png", "..", "."} {
+		if _, err := a.storeResult(miniPNG, out); err == nil {
+			t.Errorf("storeResult(%q) expected an error, got none", out)
+		}
+	}
+	entries, _ := os.ReadDir(a.outputDir)
+	if len(entries) != 0 {
+		t.Errorf("expected nothing stored for invalid filenames, found %d files", len(entries))
 	}
 }
 

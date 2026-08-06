@@ -7,12 +7,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const noImage = document.getElementById('no-image');
   const btnProcess = document.getElementById('btn-process');
   const processStatus = document.getElementById('process-status');
+  const processSpinner = document.getElementById('process-spinner');
+  const processLabel = document.getElementById('process-label');
+  const promptText = document.getElementById('prompt-text');
 
   const resultCard = document.getElementById('result-card');
   const resultImage = document.getElementById('result-image');
   const resultFilename = document.getElementById('result-filename');
   const resultModel = document.getElementById('result-model');
   const resultTime = document.getElementById('result-time');
+  const btnReset = document.getElementById('btn-reset');
 
   const dropZone = document.getElementById('drop-zone');
   const previewFrame = document.getElementById('preview-frame');
@@ -32,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let cameraStream = null;
   let currentBlob = null;
   let cropRect = null;
+  let lastOutputFile = null;
 
   async function fetchJSON(url, options) {
     const res = await fetch(url, options);
@@ -54,6 +59,20 @@ document.addEventListener('DOMContentLoaded', () => {
         connBadge.classList.add('text-bg-danger');
         connBadge.textContent = 'offline';
       });
+  }
+
+  function loadPrompt() {
+    fetchJSON('api/v1/prompt')
+      .then((data) => {
+        promptText.value = data.prompt || '';
+      })
+      .catch(() => {});
+  }
+
+  function setProcessing(on) {
+    btnProcess.disabled = on || !currentBlob;
+    processSpinner.classList.toggle('d-none', !on);
+    processLabel.textContent = on ? 'Processing...' : 'Process';
   }
 
   async function startCamera() {
@@ -321,6 +340,8 @@ document.addEventListener('DOMContentLoaded', () => {
     currentBlob = blob;
     cropRect = null;
     cropDrag = null;
+    lastOutputFile = null;
+    resultCard.classList.add('d-none');
     preview.src = URL.createObjectURL(blob);
     previewWrap.classList.remove('d-none');
     noImage.classList.add('d-none');
@@ -361,13 +382,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnProcess.addEventListener('click', async () => {
     if (!currentBlob) return;
-    btnProcess.disabled = true;
+    setProcessing(true);
     processStatus.textContent = 'Processing...';
     try {
       const sendBlob = await croppedBlob(currentBlob);
       const form = new FormData();
       form.append('image', sendBlob, 'capture.jpg');
+      const prompt = promptText.value.trim();
+      if (prompt) form.append('prompt', prompt);
+      if (lastOutputFile) form.append('output', lastOutputFile);
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
+      lastOutputFile = data.filename;
       resultImage.src = 'api/v1/images/' + encodeURIComponent(data.filename);
       resultFilename.textContent = data.filename;
       resultModel.textContent = data.model;
@@ -378,9 +403,26 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       processStatus.textContent = 'Failed: ' + err.message;
     } finally {
-      btnProcess.disabled = false;
+      setProcessing(false);
     }
   });
 
+  btnReset.addEventListener('click', () => {
+    currentBlob = null;
+    cropRect = null;
+    cropDrag = null;
+    lastOutputFile = null;
+    preview.src = '';
+    previewWrap.classList.add('d-none');
+    noImage.classList.remove('d-none');
+    resultCard.classList.add('d-none');
+    resultImage.src = '';
+    processStatus.textContent = '';
+    setProcessing(false);
+    btnProcess.disabled = true;
+    loadPrompt();
+  });
+
   checkConnection();
+  loadPrompt();
 });

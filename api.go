@@ -101,9 +101,13 @@ type ErrorResponse struct {
 // ProcessImageRequest is the JSON payload accepted by the image processing
 // endpoint. The Image field holds the image as base64 (optionally wrapped in a
 // data URL) and may be omitted when sending multipart form data instead.
+// Prompt overrides the prompt sent to the model; Output names the file the
+// processed image is written to (overwriting any existing file).
 type ProcessImageRequest struct {
 	Image    string `json:"image" example:"data:image/jpeg;base64,..."`
 	Filename string `json:"filename" example:"photo.jpg"`
+	Prompt   string `json:"prompt" example:"Clean this scanned image"`
+	Output   string `json:"output" example:"img-20260806-123000-a1b2c3d4.jpg"`
 }
 
 // ProcessImageResponse describes the outcome of processing an image.
@@ -268,6 +272,18 @@ func (a *api) info(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// prompt returns the current processing prompt so the UI can show and let the
+// user edit what is sent to the model.
+// @Summary Get Processing Prompt
+// @Description Returns the prompt text sent to the model with each image.
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /api/v1/prompt [get]
+func (a *api) prompt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"prompt": a.processPrompt()})
+}
+
 // listItems returns all stored items.
 // @Summary List Items
 // @Description Returns all stored items.
@@ -319,6 +335,15 @@ func (a *api) createItem(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(newItem)
 }
 
+// imagePayload holds the parsed contents of an image processing request.
+type imagePayload struct {
+	img         []byte
+	filename    string
+	contentType string
+	prompt      string
+	output      string
+}
+
 // processImage accepts an image (multipart upload or JSON base64/data URL),
 // sends it to an OpenRouter vision model for processing, and stores the image
 // and the resulting description on the file system.
@@ -327,6 +352,8 @@ func (a *api) createItem(w http.ResponseWriter, r *http.Request) {
 // @Accept mpfd
 // @Produce json
 // @Param image formData file true "Image to process"
+// @Param prompt formData string false "Prompt to send with the image; defaults to the configured prompt"
+// @Param output formData string false "Optional filename to write the processed image to, replacing any existing file with that name"
 // @Success 200 {object} ProcessImageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
@@ -335,22 +362,22 @@ func (a *api) createItem(w http.ResponseWriter, r *http.Request) {
 func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxImageUploadBytes)
 
-	img, _, contentType, err := readImagePayload(r)
+	pl, err := readImagePayload(r)
 	if err != nil {
 		a.jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Trust a declared image content type, otherwise sniff the bytes (browsers
 	// send application/octet-stream for multipart file parts).
-	if !strings.HasPrefix(contentType, "image/") {
-		contentType = http.DetectContentType(img)
+	if !strings.HasPrefix(pl.contentType, "image/") {
+		pl.contentType = http.DetectContentType(pl.img)
 	}
-	if !strings.HasPrefix(contentType, "image/") {
+	if !strings.HasPrefix(pl.contentType, "image/") {
 		a.jsonError(w, http.StatusBadRequest, "Uploaded file is not a recognised image")
 		return
 	}
 
-	processed, err := a.processWithOpenRouter(img, contentType)
+	processed, err := a.processWithOpenRouter(pl.img, pl.contentType, pl.prompt)
 	if err != nil {
 		code := http.StatusBadGateway
 		if errors.Is(err, errOpenRouterNotConfigured) {
@@ -360,7 +387,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imageFile, err := a.storeResult(processed)
+	imageFile, err := a.storeResult(processed, pl.output)
 	if err != nil {
 		a.jsonError(w, http.StatusInternalServerError, "Failed to store processed image: "+err.Error())
 		return
@@ -374,14 +401,14 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// readImagePayload extracts the image bytes, original filename and content
-// type from either a JSON payload (base64 or data URL in the "image" field) or
-// a multipart form upload (the "image" file part).
-func readImagePayload(r *http.Request) ([]byte, string, string, error) {
+// readImagePayload extracts the image bytes, original filename, content type,
+// prompt and output filename from either a JSON payload (base64 or data URL in
+// the "image" field) or a multipart form upload (the "image" file part).
+func readImagePayload(r *http.Request) (*imagePayload, error) {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var req ProcessImageRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Image == "" {
-			return nil, "", "", errors.New("Missing image payload")
+			return nil, errors.New("Missing image payload")
 		}
 		data := req.Image
 		if idx := strings.Index(data, ","); idx >= 0 && strings.HasPrefix(data, "data:") {
@@ -389,35 +416,50 @@ func readImagePayload(r *http.Request) ([]byte, string, string, error) {
 		}
 		img, err := base64.StdEncoding.DecodeString(strings.TrimSpace(data))
 		if err != nil {
-			return nil, "", "", errors.New("Invalid base64 image payload")
+			return nil, errors.New("Invalid base64 image payload")
 		}
-		return img, req.Filename, "", nil
+		return &imagePayload{
+			img:      img,
+			filename: req.Filename,
+			prompt:   req.Prompt,
+			output:   req.Output,
+		}, nil
 	}
 
 	if err := r.ParseMultipartForm(maxImageUploadBytes); err != nil {
-		return nil, "", "", errors.New("Invalid multipart form data")
+		return nil, errors.New("Invalid multipart form data")
 	}
 	f, hdr, err := r.FormFile("image")
 	if err != nil {
-		return nil, "", "", errors.New("Missing 'image' file field")
+		return nil, errors.New("Missing 'image' file field")
 	}
 	defer f.Close()
 	img, err := io.ReadAll(f)
 	if err != nil {
-		return nil, "", "", errors.New("Failed to read uploaded image")
+		return nil, errors.New("Failed to read uploaded image")
 	}
 	filename := hdr.Filename
 	if filename == "" {
 		filename = "upload.jpg"
 	}
-	return img, filename, hdr.Header.Get("Content-Type"), nil
+	return &imagePayload{
+		img:         img,
+		filename:    filename,
+		contentType: hdr.Header.Get("Content-Type"),
+		prompt:      r.FormValue("prompt"),
+		output:      r.FormValue("output"),
+	}, nil
 }
 
 // processWithOpenRouter sends the image to the configured OpenRouter image
-// model and returns the processed image returned by the model.
-func (a *api) processWithOpenRouter(img []byte, contentType string) ([]byte, error) {
+// model and returns the processed image returned by the model. When prompt is
+// empty the configured prompt is used.
+func (a *api) processWithOpenRouter(img []byte, contentType, prompt string) ([]byte, error) {
 	if a.openRouterKey == "" {
 		return nil, errOpenRouterNotConfigured
+	}
+	if strings.TrimSpace(prompt) == "" {
+		prompt = a.processPrompt()
 	}
 
 	dataURL := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(img)
@@ -428,7 +470,7 @@ func (a *api) processWithOpenRouter(img []byte, contentType string) ([]byte, err
 			map[string]any{
 				"role": "user",
 				"content": []any{
-					map[string]any{"type": "text", "text": a.processPrompt()},
+					map[string]any{"type": "text", "text": prompt},
 					map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURL}},
 				},
 			},
@@ -559,15 +601,24 @@ func decodeDataURL(s string) ([]byte, bool) {
 }
 
 // storeResult writes the processed image to the configured output directory
-// under a unique timestamped base name.
-func (a *api) storeResult(img []byte) (string, error) {
+// under a unique timestamped base name, or under the given output filename when
+// one is supplied (overwriting any existing file with that name).
+func (a *api) storeResult(img []byte, output string) (string, error) {
 	if err := os.MkdirAll(a.outputDir, 0o755); err != nil {
 		return "", err
 	}
 
-	contentType := http.DetectContentType(img)
-	base := "img-" + uniqueName()
-	imageFile := base + extensionForContentType(contentType)
+	imageFile := output
+	if imageFile == "" {
+		contentType := http.DetectContentType(img)
+		imageFile = "img-" + uniqueName() + extensionForContentType(contentType)
+	} else {
+		// The filename is matched against a single path segment so directory
+		// traversal is not possible.
+		if filepath.Base(imageFile) != imageFile || imageFile == "." || imageFile == ".." {
+			return "", errors.New("invalid output filename")
+		}
+	}
 
 	if err := os.WriteFile(filepath.Join(a.outputDir, imageFile), img, 0o644); err != nil {
 		return "", err

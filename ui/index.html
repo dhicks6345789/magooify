@@ -55,7 +55,18 @@
               <div class="small mt-1">or click to browse</div>
             </div>
           </div>
-          <button type="button" id="btn-process" class="btn btn-success btn-lg w-100 mt-3" disabled>Process</button>
+          <div class="mt-3">
+            <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" data-bs-toggle="collapse" data-bs-target="#prompt-collapse" aria-expanded="false" aria-controls="prompt-collapse">
+              <span id="prompt-toggle-caret" class="me-1">&#9656;</span>Edit prompt
+            </button>
+            <div class="collapse" id="prompt-collapse">
+              <textarea id="prompt-text" class="form-control mt-2" rows="4" aria-label="Prompt sent with the image"></textarea>
+            </div>
+          </div>
+          <button type="button" id="btn-process" class="btn btn-success btn-lg w-100 mt-2" disabled>
+            <span class="spinner-border spinner-border-sm me-2 d-none" id="process-spinner" aria-hidden="true"></span>
+            <span id="process-label">Process</span>
+          </button>
           <div id="process-status" class="small mt-2 text-secondary text-center">&nbsp;</div>
         </div>
       </div>
@@ -68,6 +79,7 @@
             <div class="font-monospace" id="result-filename"></div>
             <div><span id="result-model"></span> &middot; <span id="result-time"></span></div>
           </div>
+          <button type="button" id="btn-reset" class="btn btn-outline-secondary w-100 mt-3">Process Another Image</button>
         </div>
       </div>
     </main>

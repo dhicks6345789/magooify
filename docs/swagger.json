@@ -165,6 +165,18 @@
                         "name": "image",
                         "in": "formData",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Prompt to send with the image; defaults to the configured prompt",
+                        "name": "prompt",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional filename to write the processed image to, replacing any existing file with that name",
+                        "name": "output",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -190,6 +202,26 @@
                         "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/prompt": {
+            "get": {
+                "description": "Returns the prompt text sent to the model with each image.",
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Get Processing Prompt",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
