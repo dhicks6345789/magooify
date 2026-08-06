@@ -20,10 +20,23 @@ body {
   font-weight: 700;
 }
 
+.drop-zone {
+  border: 2px dashed var(--bs-border-color);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease-in-out, background-color 0.15s ease-in-out;
+}
+
+.drop-zone.dragover {
+  border-color: var(--bs-info);
+  background: rgba(13, 202, 240, 0.08);
+}
+
 .preview-wrap {
   background: #090d16;
   border: 1px solid var(--bs-border-color);
-  border-radius: 0.5rem;
+  border-radius: 0.35rem;
   padding: 0.5rem;
 }
 
@@ -44,17 +57,4 @@ body {
   max-height: 60vh;
   background: #000;
   border-radius: 0.5rem;
-}
-
-.code-block {
-  background: #090d16;
-  border: 1px solid var(--bs-border-color);
-  border-radius: 0.5rem;
-  padding: 1rem;
-  font-size: 0.85rem;
-  color: #a7f3d0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 40vh;
-  overflow-y: auto;
 }

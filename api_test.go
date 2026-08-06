@@ -626,6 +626,7 @@ func TestProcessImageRejectsNonImage(t *testing.T) {
 func TestImageProcessingRoutes(t *testing.T) {
 	registerMimeTypes()
 
+	processedPNG := base64.StdEncoding.EncodeToString(miniPNG)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
 			t.Errorf("Authorization = %q, want %q", got, "Bearer test-key")
@@ -637,14 +638,21 @@ func TestImageProcessingRoutes(t *testing.T) {
 		if body["model"] != defaultModel {
 			t.Errorf("model = %v, want %q", body["model"], defaultModel)
 		}
+		if mods, ok := body["modalities"].([]any); !ok || len(mods) == 0 {
+			t.Errorf("expected image modalities to be requested, got %v", body["modalities"])
+		}
 		messages := body["messages"].([]any)
 		content := messages[0].(map[string]any)["content"].([]any)
 		text := content[0].(map[string]any)["text"].(string)
 		if text != strings.TrimSpace(promptMD) {
 			t.Errorf("prompt text = %q, want PROMPT.md text %q", text, strings.TrimSpace(promptMD))
 		}
+		imagePart := content[1].(map[string]any)["image_url"].(map[string]any)["url"].(string)
+		if !strings.HasPrefix(imagePart, "data:image/png;base64,") {
+			t.Errorf("image data URL = %q, want a PNG data URL", imagePart)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"choices":[{"message":{"content":"A tiny test image"}}]}`))
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":[{"type":"text","text":"cleaned"},{"type":"image_url","image_url":{"url":"data:image/png;base64,%s"}}]}}]}`, processedPNG)
 	}))
 	defer fake.Close()
 
@@ -676,25 +684,29 @@ func TestImageProcessingRoutes(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &processed); err != nil {
 		t.Fatalf("failed to parse process response: %v", err)
 	}
-	if processed.Description != "A tiny test image" {
-		t.Errorf("description = %q, want %q", processed.Description, "A tiny test image")
-	}
 	if !strings.HasSuffix(processed.Filename, ".png") {
 		t.Errorf("filename = %q, want a .png name", processed.Filename)
 	}
-	if processed.TextFile == "" || !strings.HasSuffix(processed.TextFile, ".txt") {
-		t.Errorf("text_file = %q, want a .txt name", processed.TextFile)
-	}
 
-	// Both files must exist on disk.
+	// The processed image must be on disk; no description text file.
 	if _, err := os.Stat(filepath.Join(a.outputDir, processed.Filename)); err != nil {
 		t.Errorf("stored image missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(a.outputDir, processed.TextFile)); err != nil {
-		t.Errorf("stored description missing: %v", err)
+	stored, err := os.ReadFile(filepath.Join(a.outputDir, processed.Filename))
+	if err != nil {
+		t.Fatalf("failed to read stored image: %v", err)
+	}
+	if !bytes.Equal(stored, miniPNG) {
+		t.Errorf("stored bytes do not match the processed image returned by the model")
+	}
+	entries, _ := os.ReadDir(a.outputDir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".txt") {
+			t.Errorf("unexpected .txt file stored: %s", e.Name())
+		}
 	}
 
-	// The stored image must be listed, newest first, with its description.
+	// The stored image must be listed, newest first.
 	req2 := httptest.NewRequest("GET", "/api/v1/images", nil)
 	rr2 := httptest.NewRecorder()
 	handler.ServeHTTP(rr2, req2)
@@ -711,9 +723,6 @@ func TestImageProcessingRoutes(t *testing.T) {
 	if list.Images[0].Filename != processed.Filename {
 		t.Errorf("listed filename = %q, want %q", list.Images[0].Filename, processed.Filename)
 	}
-	if list.Images[0].Description != "A tiny test image" {
-		t.Errorf("listed description = %q, want %q", list.Images[0].Description, "A tiny test image")
-	}
 
 	// The stored image must be served back with the correct content type.
 	req3 := httptest.NewRequest("GET", "/api/v1/images/"+processed.Filename, nil)
@@ -726,14 +735,15 @@ func TestImageProcessingRoutes(t *testing.T) {
 		t.Errorf("content-type = %q, want %q", ct, "image/png")
 	}
 	if !bytes.Equal(rr3.Body.Bytes(), miniPNG) {
-		t.Errorf("served image bytes do not match the uploaded image")
+		t.Errorf("served image bytes do not match the processed image")
 	}
 }
 
 func TestProcessImageJSONPayload(t *testing.T) {
+	processedPNG := base64.StdEncoding.EncodeToString(miniPNG)
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`, processedPNG)
 	}))
 	defer fake.Close()
 
@@ -757,8 +767,11 @@ func TestProcessImageJSONPayload(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if resp.Description != "OK" {
-		t.Errorf("description = %q, want %q", resp.Description, "OK")
+	if !strings.HasSuffix(resp.Filename, ".png") {
+		t.Errorf("filename = %q, want a .png name", resp.Filename)
+	}
+	if resp.Model != defaultModel {
+		t.Errorf("model = %q, want %q", resp.Model, defaultModel)
 	}
 }
 

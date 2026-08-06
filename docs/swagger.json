@@ -150,7 +150,7 @@
         },
         "/api/v1/process": {
             "post": {
-                "description": "Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the image and the resulting description in the configured output directory.",
+                "description": "Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the processed version of the image in the configured output directory.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -290,10 +290,6 @@
         "ProcessImageResponse": {
             "type": "object",
             "properties": {
-                "description": {
-                    "type": "string",
-                    "example": "A sunny garden with a wooden bench."
-                },
                 "filename": {
                     "type": "string",
                     "example": "img-20260806-123000-a1b2c3d4.jpg"
@@ -304,20 +300,12 @@
                 },
                 "processed_at": {
                     "type": "string"
-                },
-                "text_file": {
-                    "type": "string",
-                    "example": "img-20260806-123000-a1b2c3d4.txt"
                 }
             }
         },
         "StoredImage": {
             "type": "object",
             "properties": {
-                "description": {
-                    "type": "string",
-                    "example": "A sunny garden with a wooden bench."
-                },
                 "filename": {
                     "type": "string",
                     "example": "img-20260806-123000-a1b2c3d4.jpg"
@@ -328,10 +316,6 @@
                 "size": {
                     "type": "integer",
                     "example": 48291
-                },
-                "text_file": {
-                    "type": "string",
-                    "example": "img-20260806-123000-a1b2c3d4.txt"
                 }
             }
         },

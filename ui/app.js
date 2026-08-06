@@ -11,17 +11,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const resultCard = document.getElementById('result-card');
   const resultImage = document.getElementById('result-image');
-  const resultDescription = document.getElementById('result-description');
   const resultFilename = document.getElementById('result-filename');
   const resultModel = document.getElementById('result-model');
   const resultTime = document.getElementById('result-time');
+
+  const dropZone = document.getElementById('drop-zone');
 
   const cameraModal = document.getElementById('cameraModal');
   const cameraVideo = document.getElementById('camera-video');
   const cameraError = document.getElementById('camera-error');
   const btnCapture = document.getElementById('btn-capture');
 
-  const MAX_DIM = 1280;
+  // The model window is roughly 1024x1024; keep the longest side at or below
+  // it so the whole image is seen rather than only its top-left corner.
+  const MAX_DIM = 1024;
 
   let cameraStream = null;
   let currentBlob = null;
@@ -100,6 +103,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnUpload.addEventListener('click', () => fileInput.click());
 
+  dropZone.addEventListener('click', () => fileInput.click());
+
+  ['dragenter', 'dragover'].forEach((evt) => {
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach((evt) => {
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+    });
+  });
+
+  dropZone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    downscaleImage(file)
+      .then((blob) => setImage(blob, file.name))
+      .catch((err) => {
+        processStatus.textContent = 'Could not read image: ' + err.message;
+      });
+  });
+
   fileInput.addEventListener('change', () => {
     const file = fileInput.files[0];
     if (!file) return;
@@ -146,7 +175,6 @@ document.addEventListener('DOMContentLoaded', () => {
       form.append('image', currentBlob, 'capture.jpg');
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
       resultImage.src = 'api/v1/images/' + encodeURIComponent(data.filename);
-      resultDescription.textContent = data.description;
       resultFilename.textContent = data.filename;
       resultModel.textContent = data.model;
       resultTime.textContent = new Date(data.processed_at).toLocaleString();

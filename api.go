@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -107,19 +108,15 @@ type ProcessImageRequest struct {
 // ProcessImageResponse describes the outcome of processing an image.
 type ProcessImageResponse struct {
 	Filename    string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
-	TextFile    string    `json:"text_file" example:"img-20260806-123000-a1b2c3d4.txt"`
-	Description string    `json:"description" example:"A sunny garden with a wooden bench."`
 	Model       string    `json:"model" example:"google/gemini-3.1-flash-lite-image"`
 	ProcessedAt time.Time `json:"processed_at"`
 }
 
 // StoredImage describes a processed image stored on the file system.
 type StoredImage struct {
-	Filename    string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
-	TextFile    string    `json:"text_file,omitempty" example:"img-20260806-123000-a1b2c3d4.txt"`
-	Size        int64     `json:"size" example:"48291"`
-	Modified    time.Time `json:"modified"`
-	Description string    `json:"description,omitempty" example:"A sunny garden with a wooden bench."`
+	Filename string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
+	Size     int64     `json:"size" example:"48291"`
+	Modified time.Time `json:"modified"`
 }
 
 // ImagesResponse is the payload returned when listing stored images.
@@ -325,7 +322,7 @@ func (a *api) createItem(w http.ResponseWriter, r *http.Request) {
 // sends it to an OpenRouter vision model for processing, and stores the image
 // and the resulting description on the file system.
 // @Summary Process an Image with OpenRouter
-// @Description Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the image and the resulting description in the configured output directory.
+// @Description Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the processed version of the image in the configured output directory.
 // @Accept mpfd
 // @Produce json
 // @Param image formData file true "Image to process"
@@ -337,7 +334,7 @@ func (a *api) createItem(w http.ResponseWriter, r *http.Request) {
 func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxImageUploadBytes)
 
-	img, filename, contentType, err := readImagePayload(r)
+	img, _, contentType, err := readImagePayload(r)
 	if err != nil {
 		a.jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -352,7 +349,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	description, err := a.processWithOpenRouter(img, contentType, filename)
+	processed, err := a.processWithOpenRouter(img, contentType)
 	if err != nil {
 		code := http.StatusBadGateway
 		if errors.Is(err, errOpenRouterNotConfigured) {
@@ -362,7 +359,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imageFile, textFile, err := a.storeResult(img, contentType, description)
+	imageFile, err := a.storeResult(processed)
 	if err != nil {
 		a.jsonError(w, http.StatusInternalServerError, "Failed to store processed image: "+err.Error())
 		return
@@ -371,8 +368,6 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ProcessImageResponse{
 		Filename:    imageFile,
-		TextFile:    textFile,
-		Description: description,
 		Model:       a.model,
 		ProcessedAt: time.Now().UTC(),
 	})
@@ -417,16 +412,17 @@ func readImagePayload(r *http.Request) ([]byte, string, string, error) {
 	return img, filename, hdr.Header.Get("Content-Type"), nil
 }
 
-// processWithOpenRouter sends the image to the configured OpenRouter vision
-// model as a chat completion and returns the model's textual description.
-func (a *api) processWithOpenRouter(img []byte, contentType, filename string) (string, error) {
+// processWithOpenRouter sends the image to the configured OpenRouter image
+// model and returns the processed image returned by the model.
+func (a *api) processWithOpenRouter(img []byte, contentType string) ([]byte, error) {
 	if a.openRouterKey == "" {
-		return "", errOpenRouterNotConfigured
+		return nil, errOpenRouterNotConfigured
 	}
 
 	dataURL := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(img)
 	payload := map[string]any{
-		"model": a.model,
+		"model":      a.model,
+		"modalities": []string{"image", "text"},
 		"messages": []any{
 			map[string]any{
 				"role": "user",
@@ -439,69 +435,137 @@ func (a *api) processWithOpenRouter(img []byte, contentType, filename string) (s
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("Failed to build OpenRouter request: %w", err)
+		return nil, fmt.Errorf("Failed to build OpenRouter request: %w", err)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, a.openRouterURL, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("Failed to create OpenRouter request: %w", err)
+		return nil, fmt.Errorf("Failed to create OpenRouter request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("OpenRouter request failed: %w", err)
+		return nil, fmt.Errorf("OpenRouter request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", fmt.Errorf("Failed to read OpenRouter response: %w", err)
+		return nil, fmt.Errorf("Failed to read OpenRouter response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OpenRouter returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, fmt.Errorf("OpenRouter returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
+	return extractImageFromResponse(respBody)
+}
+
+// extractImageFromResponse pulls the processed image out of an OpenRouter
+// response. Image-capable models return the generated image inside the message
+// content as an image_url part (a base64 data URL) or in a top-level "images"
+// array; some models return the data URL directly as the content string.
+func extractImageFromResponse(respBody []byte) ([]byte, error) {
 	var chat struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content json.RawMessage `json:"content"`
+				Images  []struct {
+					ImageURL struct {
+						URL string `json:"url"`
+					} `json:"image_url"`
+				} `json:"images"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &chat); err != nil {
-		return "", fmt.Errorf("Failed to parse OpenRouter response: %w", err)
+		return nil, fmt.Errorf("Failed to parse OpenRouter response: %w", err)
 	}
 	if len(chat.Choices) == 0 {
-		return "", errors.New("OpenRouter returned no choices")
+		return nil, errors.New("OpenRouter returned no choices")
 	}
 
-	desc := strings.TrimSpace(chat.Choices[0].Message.Content)
-	if desc == "" {
-		desc = "No description returned"
+	msg := chat.Choices[0].Message
+
+	for _, im := range msg.Images {
+		if img, ok := decodeDataURL(im.ImageURL.URL); ok {
+			return img, nil
+		}
 	}
-	return desc, nil
+
+	if len(msg.Content) == 0 {
+		return nil, errors.New("OpenRouter returned no image output")
+	}
+
+	// content may be a JSON string (a data URL) or an array of content parts.
+	var contentStr string
+	if json.Unmarshal(msg.Content, &contentStr) == nil {
+		if img, ok := decodeDataURL(contentStr); ok {
+			return img, nil
+		}
+		return nil, errors.New("OpenRouter returned no image output")
+	}
+
+	var parts []struct {
+		Type     string `json:"type"`
+		ImageURL *struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if err := json.Unmarshal(msg.Content, &parts); err != nil {
+		return nil, fmt.Errorf("Failed to parse OpenRouter content parts: %w", err)
+	}
+	for _, p := range parts {
+		if p.ImageURL != nil {
+			if img, ok := decodeDataURL(p.ImageURL.URL); ok {
+				return img, nil
+			}
+		}
+	}
+	return nil, errors.New("OpenRouter returned no image output")
 }
 
-// storeResult writes the processed image and its textual description to the
-// configured output directory under a unique timestamped base name.
-func (a *api) storeResult(img []byte, contentType, description string) (string, string, error) {
+// decodeDataURL decodes a base64 data URL into its raw bytes. The second
+// return value reports whether the string looked like a valid data URL.
+func decodeDataURL(s string) ([]byte, bool) {
+	if !strings.HasPrefix(s, "data:") {
+		return nil, false
+	}
+	comma := strings.Index(s, ",")
+	if comma < 0 {
+		return nil, false
+	}
+	meta := s[:comma]
+	payload := s[comma+1:]
+	if !strings.Contains(meta, ";base64") {
+		if decoded, err := url.PathUnescape(payload); err == nil {
+			return []byte(decoded), true
+		}
+		return nil, false
+	}
+	img, err := base64.StdEncoding.DecodeString(strings.TrimSpace(payload))
+	if err != nil {
+		return nil, false
+	}
+	return img, true
+}
+
+// storeResult writes the processed image to the configured output directory
+// under a unique timestamped base name.
+func (a *api) storeResult(img []byte) (string, error) {
 	if err := os.MkdirAll(a.outputDir, 0o755); err != nil {
-		return "", "", err
+		return "", err
 	}
 
+	contentType := http.DetectContentType(img)
 	base := "img-" + uniqueName()
 	imageFile := base + extensionForContentType(contentType)
-	textFile := base + ".txt"
 
 	if err := os.WriteFile(filepath.Join(a.outputDir, imageFile), img, 0o644); err != nil {
-		return "", "", err
+		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(a.outputDir, textFile), []byte(description), 0o644); err != nil {
-		return "", "", err
-	}
-	return imageFile, textFile, nil
+	return imageFile, nil
 }
 
 // uniqueName builds a collision-resistant name from a UTC timestamp and a
@@ -533,7 +597,7 @@ func extensionForContentType(ct string) string {
 }
 
 // listImages returns the processed images stored in the output directory,
-// newest first, each with the stored description text if available.
+// newest first.
 // @Summary List Stored Images
 // @Description Lists the processed images stored in the configured output directory, newest first.
 // @Produce json
@@ -556,22 +620,11 @@ func (a *api) listImages(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		img := StoredImage{
+		images = append(images, StoredImage{
 			Filename: e.Name(),
 			Size:     info.Size(),
 			Modified: info.ModTime(),
-		}
-		base := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		if desc, err := os.ReadFile(filepath.Join(a.outputDir, base+".txt")); err == nil {
-			if s := strings.TrimSpace(string(desc)); s != "" {
-				img.TextFile = base + ".txt"
-				if len(s) > 2000 {
-					s = s[:2000] + "…"
-				}
-				img.Description = s
-			}
-		}
-		images = append(images, img)
+		})
 	}
 
 	sort.Slice(images, func(i, j int) bool { return images[i].Modified.After(images[j].Modified) })

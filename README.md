@@ -2,13 +2,13 @@
 
 Magooify is a self-hostable Go application that bundles application logic, an embedded Bootstrap web user interface and interactive OpenAPI documentation into a single executable.
 
-The web interface lets you take a photo with your device camera or upload an image file. Magooify sends the image to a vision-capable model on OpenRouter for processing, then saves the image and the model's description to a folder on disk.
+The web interface lets you take a photo with your device camera or upload (or drag and drop) an image file. Magooify sends the image to an image-capable model on OpenRouter for processing, then saves the processed version of the image to a folder on disk.
 
 ## Features
 
-- **Image Capture**: Take photos directly with your device camera (via `getUserMedia`) or upload image files from your machine.
-- **OpenRouter Processing**: Captured images are sent to a vision model on OpenRouter for description and analysis.
-- **File System Storage**: Processed images and their text descriptions are saved to a configurable output directory.
+- **Image Capture**: Take photos directly with your device camera (via `getUserMedia`) or upload (or drag and drop) image files from your machine.
+- **OpenRouter Processing**: Captured images are sent to an image model on OpenRouter, which returns the processed version of the image.
+- **File System Storage**: The processed image is saved to a configurable output directory.
 - **Single Executable Deployment**: Uses Go's `embed` package to bundle the frontend HTML / CSS / JavaScript assets, documentation and OpenAPI specifications into a single binary.
 - **Offline Operation**: Designed to be able to operate without internet access; all UI libraries and documentation resources are served locally. (Note: processing an image needs internet access to reach OpenRouter.)
 - **Works on Desktop and Server**:
@@ -34,8 +34,8 @@ Optional flags:
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the image endpoint reports that OpenRouter is not configured. |
-| `-output-dir` | `processed` | Folder where processed images and their text descriptions are stored. |
-| `-model` | `google/gemini-3.1-flash-lite-image` | OpenRouter model used to process the images (any vision-capable model). |
+| `-output-dir` | `processed` | Folder where processed images are stored. |
+| `-model` | `google/gemini-3.1-flash-lite-image` | OpenRouter model used to process the images (any image-capable model). |
 | `-prompt-file` | (unset) | Path to a file whose text is sent to the model with each image, instead of the embedded `PROMPT.md`. |
 | `-port` | `8080` | Port for the local server. |
 | `-mode` | `desktop` | `desktop` or `server`. |
