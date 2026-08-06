@@ -574,6 +574,12 @@ func buildModelList(rows []openRouterModel) []ModelInfo {
 			continue
 		}
 
+		// Router models (e.g. openrouter/auto) advertise image in/out but have
+		// no fixed price (the -1 sentinel), so there is no cost to show.
+		if !pricingAvailable(m.Pricing) {
+			continue
+		}
+
 		prompt := parsePrice(m.Pricing.Prompt)
 		completion := parsePrice(m.Pricing.Completion)
 		request := parsePrice(m.Pricing.Request)
@@ -631,6 +637,18 @@ func perImagePrice(prices []openRouterDisplayPrice, label string) (price float64
 		}
 	}
 	return 0, false
+}
+
+// pricingAvailable reports whether OpenRouter publishes a usable price for a
+// model. Router models use a negative value (the "-1" sentinel) for every
+// field because their cost depends on whichever model they route to, and some
+// models omit prices entirely, so there is no cost to display for them. A
+// genuine free model still publishes an explicit "0".
+func pricingAvailable(p openRouterPricing) bool {
+	prompt := strings.TrimSpace(p.Prompt)
+	completion := strings.TrimSpace(p.Completion)
+	unset := func(v string) bool { return v == "" || strings.HasPrefix(v, "-") }
+	return !(unset(prompt) && unset(completion))
 }
 
 // parsePrice converts an OpenRouter price string to its float64 value. OpenRouter

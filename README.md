@@ -64,7 +64,7 @@ The UI shows the total cost of the current session (in US dollars, formatted to 
 
 ## Choosing a Model
 
-The **Models** button in the top bar opens a searchable list of the OpenRouter models that can process an image and return a processed image (fetched live from OpenRouter's `/api/v1/models` endpoint, which requires your OpenRouter API key, and cached briefly), together with the estimated cost of processing a single image with each one. The currently configured model is marked *active*. Exact per-image prices are used when OpenRouter publishes them (via the `display_pricing` entries billed per image, e.g. Recraft's image models); where a model bills by the image token instead, the cost per image is estimated from its per-image-token rates assuming a typical 1024x1024 image plus a generated image output. Prices change, so treat the figures as guidance and check OpenRouter before committing to a model.
+The **Models** button in the top bar opens a searchable list of the OpenRouter models that can process an image and return a processed image (fetched live from OpenRouter's `/api/v1/models` endpoint, which requires your OpenRouter API key, and cached briefly), together with the estimated cost of processing a single image with each one. The currently configured model is marked *active*. OpenRouter bills most image models by the *image token*, so the cost per image is estimated from the model's published rates assuming a typical 1024x1024 image plus a generated image output; if OpenRouter publishes an exact per-image price (via `display_pricing`) it is used instead. Router models without a fixed price are omitted. Prices change, so treat the figures as guidance and check OpenRouter before committing to a model.
 
 ### Server
 

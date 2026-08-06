@@ -1230,7 +1230,7 @@ func TestExtractCost(t *testing.T) {
 func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 	rows := []openRouterModel{
 		// Image in, image out, with exact per-image prices published via
-		// display_pricing (billed per image, like Recraft's image models).
+		// display_pricing entries billed per image.
 		{
 			ID:   "google/exact-img-model",
 			Name: "Exact Image Model",
@@ -1280,11 +1280,22 @@ func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 			}{Input: []string{"text"}, Output: []string{"text"}},
 			Pricing: openRouterPricing{Prompt: "0.0000001", Completion: "0.0000004"},
 		},
+		// Router model: advertises image in/out but publishes no price (the -1
+		// sentinel), so there is no per-image cost to show.
+		{
+			ID:   "openrouter/auto",
+			Name: "Auto Router",
+			Architecture: struct {
+				Input  []string `json:"input_modalities"`
+				Output []string `json:"output_modalities"`
+			}{Input: []string{"image", "text"}, Output: []string{"image", "text"}},
+			Pricing: openRouterPricing{Prompt: "-1", Completion: "-1"},
+		},
 	}
 
 	models := buildModelList(rows)
 	if len(models) != 2 {
-		t.Fatalf("buildModelList kept %d models, want 2 (text-only and text-output excluded)", len(models))
+		t.Fatalf("buildModelList kept %d models, want 2 (router, text-only and text-output excluded)", len(models))
 	}
 
 	exact := models[0]
@@ -1449,10 +1460,9 @@ func TestModelsEndpointPaginates(t *testing.T) {
 		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.00003"}}
 	],"links":{"next":"__NEXT__"}}`
 	page2 := `{"data":[
-		{"id":"recraft/recraft-v4.1-pro-vector","name":"Recraft V4.1 Pro Vector",
-		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image"]},
-		 "pricing":{"prompt":"0","completion":"0","image_output":"0.0000718562874251497",
-		            "display_pricing":[{"kind":"unit","sku_label":"Image Output","price":"0.3","displayMultiplier":1,"unitLabel":"/image"}]}}
+		{"id":"google/gemini-3-pro-image-preview","name":"Gemini 3 Pro Image (Preview)",
+		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
+		 "pricing":{"prompt":"0.000002","completion":"0.000014","image_output":"0.00012"}}
 	],"links":{"next":""}}`
 
 	var fake *httptest.Server
@@ -1491,14 +1501,8 @@ func TestModelsEndpointPaginates(t *testing.T) {
 	ids := map[string]bool{}
 	for _, m := range resp.Models {
 		ids[m.ID] = true
-		if m.ID == "recraft/recraft-v4.1-pro-vector" {
-			if m.OutputImageCost != 0.3 || !m.OutputImageCostKnown {
-				t.Errorf("recraft output cost = %v (known=%v), want the exact $0.30/image from display_pricing",
-					m.OutputImageCost, m.OutputImageCostKnown)
-			}
-		}
 	}
-	if !ids["recraft/recraft-v4.1-pro-vector"] || !ids["google/gemini-3.1-flash-lite-image"] {
+	if !ids["google/gemini-3-pro-image-preview"] || !ids["google/gemini-3.1-flash-lite-image"] {
 		t.Errorf("models = %v, want both page models", ids)
 	}
 }
