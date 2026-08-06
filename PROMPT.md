@@ -1,0 +1,1 @@
+Clean this scanned image by identifying dark lines and replacing them with solid black. Ensure the background is pure white and remove any noise or bleed-through. Expand the fill colour on any part-filled shapes or letters to completely fill that shape with a smooth, consistent colour that exactly matches the original colour of that shape.
