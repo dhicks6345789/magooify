@@ -25,16 +25,16 @@ import (
 )
 
 const (
-	openRouterDefaultURL = "https://openrouter.ai/api/v1/chat/completions"
-	openRouterCreditsURL = "https://openrouter.ai/api/v1/credits"
-	openRouterModelsURL  = "https://openrouter.ai/api/v1/models"
-	modelsCacheTTL       = 30 * time.Minute
-	modelsMaxPages       = 10
-	defaultModel         = "google/gemini-3.1-flash-lite-image"
-	defaultOutputDir     = "processed"
-	fallbackPrompt       = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
-	maxImageUploadBytes  = 25 << 20
-	maxOpenRouterBytes   = 25 << 20
+	openRouterChatURL        = "https://openrouter.ai/api/v1/chat/completions"
+	openRouterImagesURL      = "https://openrouter.ai/api/v1/images"
+	openRouterImageModelsURL = "https://openrouter.ai/api/v1/images/models"
+	openRouterCreditsURL     = "https://openrouter.ai/api/v1/credits"
+	modelsCacheTTL           = 30 * time.Minute
+	defaultModel             = "google/gemini-3.1-flash-lite-image"
+	defaultOutputDir         = "processed"
+	fallbackPrompt           = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
+	maxImageUploadBytes      = 25 << 20
+	maxOpenRouterBytes       = 25 << 20
 )
 
 // processPrompt returns the image-processing instructions sent to the model.
@@ -140,15 +140,13 @@ type CreditsResponse struct {
 }
 
 // ModelInfo describes an OpenRouter model that can process an image and return
-// a processed image, together with the cost of a single processing run.
-// OpenRouter publishes exact per-image prices for a few models via the
-// display_pricing entries that bill by the image (unitLabel "/image"); for
-// all other models the image/image_output fields are per-image-token rates, so
-// the per-image cost is estimated from those rates (using imageInputTokenEstimate
-// and imageOutputTokenEstimate). InputImageCostKnown and OutputImageCostKnown
-// report which of the two costs is an exact published per-image price rather
-// than an estimate. EstimatedImageCost is the sum used for a single
-// image-in/image-out run.
+// a processed image, together with the cost of a single processing run. The
+// costs are exact when OpenRouter publishes a per-image price (unit "image")
+// and otherwise estimated from the per-token rate using
+// imageInputTokenEstimate and imageOutputTokenEstimate. InputImageCostKnown
+// and OutputImageCostKnown report which of the two costs is an exact published
+// per-image price rather than an estimate. EstimatedImageCost is the sum used
+// for a single image-in/image-out run.
 type ModelInfo struct {
 	ID                   string  `json:"id" example:"google/gemini-3.1-flash-lite-image"`
 	Name                 string  `json:"name" example:"Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"`
@@ -192,25 +190,26 @@ var proxyHeaders = []string{
 
 // api holds the state shared by the API handlers.
 type api struct {
-	startTime      time.Time
-	isServerMode   bool
-	items          []Item
-	nextID         int
-	mu             sync.RWMutex
-	docsFS         fs.FS
-	docsFileServer http.Handler
-	openRouterKey  string
-	managementKey  string
-	openRouterURL  string
-	creditsURL     string
-	modelsURL      string
-	model          string
-	outputDir      string
-	promptFile     string
-	httpClient     *http.Client
-	sessionCost    float64
-	modelsCache    []ModelInfo
-	modelsCachedAt time.Time
+	startTime         time.Time
+	isServerMode      bool
+	items             []Item
+	nextID            int
+	mu                sync.RWMutex
+	docsFS            fs.FS
+	docsFileServer    http.Handler
+	openRouterKey     string
+	managementKey     string
+	openRouterURL     string
+	imagesGenerateURL string
+	imagesURL         string
+	creditsURL        string
+	model             string
+	outputDir         string
+	promptFile        string
+	httpClient        *http.Client
+	sessionCost       float64
+	modelsCache       []ModelInfo
+	modelsCachedAt    time.Time
 }
 
 // @title Magooify API
@@ -228,14 +227,15 @@ func newAPI(isServerMode bool, docsFS fs.FS) *api {
 				CreatedAt: time.Now(),
 			},
 		},
-		nextID:        2,
-		docsFS:        docsFS,
-		openRouterURL: openRouterDefaultURL,
-		creditsURL:    openRouterCreditsURL,
-		modelsURL:     openRouterModelsURL,
-		model:         defaultModel,
-		outputDir:     defaultOutputDir,
-		httpClient:    &http.Client{Timeout: 120 * time.Second},
+		nextID:            2,
+		docsFS:            docsFS,
+		openRouterURL:     openRouterChatURL,
+		imagesGenerateURL: openRouterImagesURL + "/generations",
+		imagesURL:         openRouterImageModelsURL,
+		creditsURL:        openRouterCreditsURL,
+		model:             defaultModel,
+		outputDir:         defaultOutputDir,
+		httpClient:        &http.Client{Timeout: 120 * time.Second},
 	}
 
 	if sub, err := fs.Sub(docsFS, "docs"); err == nil {
@@ -411,58 +411,52 @@ const (
 	imageOutputTokenEstimate = 1290.0
 )
 
-// openRouterDisplayPrice mirrors one entry of OpenRouter's display_pricing
-// array. The entry describes how a line item is billed: kind is "token" or
-// "unit", price is the USD rate before displayMultiplier is applied, and
-// unitLabel states the billing unit (e.g. "/M tokens", "/image", "/request").
-// An entry with kind "unit" and unitLabel "/image" is a true per-image price;
-// token-billed entries (unitLabel "/M tokens") mean the image/image_output
-// fields are per-image-token rates, not per-image prices.
-type openRouterDisplayPrice struct {
-	Kind      string `json:"kind"`
-	SKULabel  string `json:"sku_label"`
-	Price     string `json:"price"`
-	UnitLabel string `json:"unitLabel"`
-}
-
-// openRouterPricing mirrors the pricing fields OpenRouter publishes for a
-// model. All values are USD strings. Fields such as "overrides" are ignored.
-type openRouterPricing struct {
-	Prompt        string                   `json:"prompt"`
-	Completion    string                   `json:"completion"`
-	Request       string                   `json:"request"`
-	Image         string                   `json:"image"`
-	ImageOutput   string                   `json:"image_output"`
-	DisplayPrices []openRouterDisplayPrice `json:"display_pricing"`
-}
-
-// openRouterModel mirrors the subset of OpenRouter's model object consumed by
-// fetchModels.
-type openRouterModel struct {
+// openRouterImageModel mirrors the subset of OpenRouter's image models listing
+// consumed by fetchModels. The listing covers every model that can generate an
+// image, including image-to-image models that the general /models endpoint
+// omits (such as the Recraft family).
+type openRouterImageModel struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	Architecture struct {
 		Input  []string `json:"input_modalities"`
 		Output []string `json:"output_modalities"`
 	} `json:"architecture"`
-	Pricing openRouterPricing `json:"pricing"`
+	EndpointsURL string `json:"endpoints"`
 }
 
-// modelsPageResponse mirrors the paginated envelope OpenRouter returns for the
-// models listing. When Links.Next is non-empty another page of results is
-// available at that URL.
-type modelsPageResponse struct {
-	Data  []openRouterModel `json:"data"`
-	Links struct {
-		Next string `json:"next"`
-	} `json:"links"`
+// openRouterImagesResponse is the envelope returned by the image models
+// listing.
+type openRouterImagesResponse struct {
+	Data []openRouterImageModel `json:"data"`
+}
+
+// openRouterImageEndpoints carries the per-provider pricing for one model.
+type openRouterImageEndpoints struct {
+	Endpoints []openRouterImageEndpoint `json:"endpoints"`
+}
+
+// openRouterImageEndpoint describes one provider endpoint serving a model.
+type openRouterImageEndpoint struct {
+	ProviderName string                 `json:"provider_name"`
+	Pricing      []openRouterImagePrice `json:"pricing"`
+}
+
+// openRouterImagePrice is one billable pricing line. Billable is either
+// "output_image" or "input_image"/"input_reference"; Unit is "image" (an exact
+// per-image price), "megapixel", or "token" (a per-token rate). Costs are in
+// US dollars.
+type openRouterImagePrice struct {
+	Billable string  `json:"billable"`
+	Unit     string  `json:"unit"`
+	CostUSD  float64 `json:"cost_usd"`
 }
 
 // models returns the OpenRouter models that can process an image and return a
-// processed image, together with the estimated cost of processing a single
-// image with each one, cheapest first.
+// processed image, together with the cost of processing a single image with
+// each one, cheapest first.
 // @Summary List Image Processing Models
-// @Description Lists OpenRouter models that can process an image and return a processed image, with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.
+// @Description Lists OpenRouter models that can process an image and return a processed image, with the cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when OpenRouter publishes them; otherwise costs are estimated from the per-token rates.
 // @Produce json
 // @Success 200 {object} ModelsResponse
 // @Failure 502 {object} ErrorResponse
@@ -484,11 +478,11 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 
 // fetchModels returns the list of OpenRouter models that accept image input
 // and return a processed image, cheapest first. The listing requires the
-// OpenRouter API key: unauthenticated requests only receive a restricted
-// subset of the catalog, so the configured key is always sent. OpenRouter
-// paginates the listing (limit 1000 per page), so follow the links.next URL
-// until the final page. The result is cached briefly so the UI can reload
-// without hammering OpenRouter.
+// OpenRouter API key. Image models are discovered through OpenRouter's
+// dedicated images endpoint, which covers image-to-image models (such as the
+// Recraft family) that the general models endpoint omits; per-image prices
+// come from each model's endpoints record. The result is cached briefly so the
+// UI can reload without hammering OpenRouter.
 func (a *api) fetchModels() ([]ModelInfo, error) {
 	a.mu.RLock()
 	if a.modelsCache != nil && time.Since(a.modelsCachedAt) < modelsCacheTTL {
@@ -502,48 +496,11 @@ func (a *api) fetchModels() ([]ModelInfo, error) {
 		return nil, errOpenRouterNotConfigured
 	}
 
-	pageURL, err := url.Parse(a.modelsURL)
+	models, err := a.fetchImageModels()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to build OpenRouter models request: %w", err)
-	}
-	q := pageURL.Query()
-	q.Set("limit", "1000")
-	pageURL.RawQuery = q.Encode()
-
-	var rows []openRouterModel
-	for page := 0; page < modelsMaxPages; page++ {
-		req, err := http.NewRequest(http.MethodGet, pageURL.String(), nil)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to build OpenRouter models request: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
-
-		resp, err := a.httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to fetch models from OpenRouter: %w", err)
-		}
-		var body modelsPageResponse
-		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, maxOpenRouterBytes)).Decode(&body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("OpenRouter models request returned status %d", resp.StatusCode)
-		}
-		if decodeErr != nil {
-			return nil, fmt.Errorf("Failed to parse OpenRouter models response: %w", decodeErr)
-		}
-
-		rows = append(rows, body.Data...)
-		if body.Links.Next == "" {
-			break
-		}
-		next, err := url.Parse(body.Links.Next)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to parse OpenRouter models next page URL: %w", err)
-		}
-		pageURL = pageURL.ResolveReference(next)
+		return nil, err
 	}
 
-	models := buildModelList(rows)
 	sort.Slice(models, func(i, j int) bool {
 		if models[i].EstimatedImageCost != models[j].EstimatedImageCost {
 			return models[i].EstimatedImageCost < models[j].EstimatedImageCost
@@ -559,107 +516,162 @@ func (a *api) fetchModels() ([]ModelInfo, error) {
 	return models, nil
 }
 
-// buildModelList converts OpenRouter's raw model objects into the ModelInfo
-// view, keeping only models that accept image input and return a processed
-// image, and computing a per-image cost for each. OpenRouter's image/image_output
-// pricing fields are per-image-token rates for most models, so a true per-image
-// price (from a display_pricing entry billed per image) takes precedence; the
-// cost is otherwise estimated from the per-token rates using
-// imageInputTokenEstimate and imageOutputTokenEstimate.
-func buildModelList(rows []openRouterModel) []ModelInfo {
-	models := make([]ModelInfo, 0, len(rows))
-	for _, m := range rows {
+// fetchImageModels loads the image models listing and, for each model, its
+// per-provider pricing records. Pricing is fetched concurrently (bounded so
+// the whole refresh completes quickly); a model whose pricing record fails to
+// load is still listed, with its costs left at zero.
+func (a *api) fetchImageModels() ([]ModelInfo, error) {
+	list, err := a.fetchImageModelList()
+	if err != nil {
+		return nil, err
+	}
+
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	models := make([]ModelInfo, 0, len(list))
+	for _, m := range list {
 		if !containsString(m.Architecture.Input, "image") ||
 			!containsString(m.Architecture.Output, "image") {
 			continue
 		}
+		wg.Add(1)
+		go func(m openRouterImageModel) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		// Router models (e.g. openrouter/auto) advertise image in/out but have
-		// no fixed price (the -1 sentinel), so there is no cost to show.
-		if !pricingAvailable(m.Pricing) {
-			continue
-		}
-
-		prompt := parsePrice(m.Pricing.Prompt)
-		completion := parsePrice(m.Pricing.Completion)
-		request := parsePrice(m.Pricing.Request)
-
-		mi := ModelInfo{
-			ID:                   m.ID,
-			Name:                 m.Name,
-			PromptPerMillion:     prompt * 1e6,
-			CompletionPerMillion: completion * 1e6,
-			RequestCost:          request,
-		}
-
-		// Input image cost: exact when OpenRouter publishes a per-image input
-		// price, otherwise the image field is a per-image-token rate so scale
-		// it by the number of tokens a typical uploaded image consumes.
-		if p, ok := perImagePrice(m.Pricing.DisplayPrices, "Image Input"); ok {
-			mi.InputImageCost = p
-			mi.InputImageCostKnown = true
-		} else if img := parsePrice(m.Pricing.Image); img > 0 {
-			mi.InputImageCost = img * imageInputTokenEstimate
-		} else {
-			mi.InputImageCost = prompt * imageInputTokenEstimate
-		}
-
-		// Output image cost: exact when OpenRouter publishes a per-image output
-		// price, otherwise estimated from the per-image-token output rate.
-		if p, ok := perImagePrice(m.Pricing.DisplayPrices, "Image Output"); ok {
-			mi.OutputImageCost = p
-			mi.OutputImageCostKnown = true
-		} else if img := parsePrice(m.Pricing.ImageOutput); img > 0 {
-			mi.OutputImageCost = img * imageOutputTokenEstimate
-		} else {
-			mi.OutputImageCost = completion * imageOutputTokenEstimate
-		}
-
-		mi.EstimatedImageCost = roundCost(mi.InputImageCost + mi.OutputImageCost + mi.RequestCost)
-		models = append(models, mi)
+			var pricing []openRouterImageEndpoint
+			if m.EndpointsURL != "" {
+				if eps, err := a.fetchImageModelEndpoints(m.EndpointsURL); err == nil {
+					pricing = eps
+				}
+			}
+			mu.Lock()
+			models = append(models, buildImageModelInfo(m, pricing))
+			mu.Unlock()
+		}(m)
 	}
-	return models
+	wg.Wait()
+	return models, nil
 }
 
-// perImagePrice looks up the true per-image price for the given SKU label in
-// OpenRouter's display_pricing entries. Only entries billed per image (kind
-// "unit" with unitLabel "/image") represent an exact per-image price; token-
-// billed entries are ignored. ok is false when no such price is published.
-func perImagePrice(prices []openRouterDisplayPrice, label string) (price float64, ok bool) {
-	for _, dp := range prices {
-		if !strings.EqualFold(dp.SKULabel, label) ||
-			!strings.EqualFold(dp.Kind, "unit") ||
-			!strings.EqualFold(strings.TrimSpace(dp.UnitLabel), "/image") {
-			continue
-		}
-		if p := parsePrice(dp.Price); p > 0 {
-			return p, true
-		}
+// fetchImageModelList retrieves the full image models listing.
+func (a *api) fetchImageModelList() ([]openRouterImageModel, error) {
+	req, err := http.NewRequest(http.MethodGet, a.imagesURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to build OpenRouter image models request: %w", err)
 	}
-	return 0, false
+	req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to fetch image models from OpenRouter: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenRouter image models request returned status %d", resp.StatusCode)
+	}
+	var body openRouterImagesResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOpenRouterBytes)).Decode(&body); err != nil {
+		return nil, fmt.Errorf("Failed to parse OpenRouter image models response: %w", err)
+	}
+	return body.Data, nil
 }
 
-// pricingAvailable reports whether OpenRouter publishes a usable price for a
-// model. Router models use a negative value (the "-1" sentinel) for every
-// field because their cost depends on whichever model they route to, and some
-// models omit prices entirely, so there is no cost to display for them. A
-// genuine free model still publishes an explicit "0".
-func pricingAvailable(p openRouterPricing) bool {
-	prompt := strings.TrimSpace(p.Prompt)
-	completion := strings.TrimSpace(p.Completion)
-	unset := func(v string) bool { return v == "" || strings.HasPrefix(v, "-") }
-	return !(unset(prompt) && unset(completion))
+// fetchImageModelEndpoints retrieves the per-provider pricing for one image
+// model from the URL published in the model listing.
+func (a *api) fetchImageModelEndpoints(endpointsURL string) ([]openRouterImageEndpoint, error) {
+	listURL, err := url.Parse(a.imagesURL)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := url.Parse(endpointsURL)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, listURL.ResolveReference(rel).String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to fetch model pricing from OpenRouter: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenRouter model pricing request returned status %d", resp.StatusCode)
+	}
+	var body openRouterImageEndpoints
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOpenRouterBytes)).Decode(&body); err != nil {
+		return nil, fmt.Errorf("Failed to parse OpenRouter model pricing response: %w", err)
+	}
+	return body.Endpoints, nil
 }
 
-// parsePrice converts an OpenRouter price string to its float64 value. OpenRouter
-// stores prices as strings, so a missing or malformed value reads as zero, and a
-// negative value (used by OpenRouter as a "price not available" sentinel, e.g.
-// for router models) also reads as zero.
-func parsePrice(v string) float64 {
-	if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
-		return f
+// buildImageModelInfo turns an image model and its pricing records into the
+// ModelInfo view used by the UI. Costs are exact when OpenRouter publishes a
+// per-image price (unit "image") and otherwise estimated from the per-token
+// rate using imageInputTokenEstimate / imageOutputTokenEstimate. The cheapest
+// provider price is used for each line.
+func buildImageModelInfo(m openRouterImageModel, pricing []openRouterImageEndpoint) ModelInfo {
+	mi := ModelInfo{ID: m.ID, Name: m.Name}
+
+	inputExact, inputToken := bestImagePrice(pricing, "input_image")
+	refExact, refToken := bestImagePrice(pricing, "input_reference")
+	if refExact > 0 && (inputExact == 0 || refExact < inputExact) {
+		inputExact = refExact
 	}
-	return 0
+	if refToken > 0 && (inputToken == 0 || refToken < inputToken) {
+		inputToken = refToken
+	}
+	outputExact, outputToken := bestImagePrice(pricing, "output_image")
+
+	mi.InputImageCost, mi.InputImageCostKnown = perImageCost(inputExact, inputToken, imageInputTokenEstimate)
+	mi.OutputImageCost, mi.OutputImageCostKnown = perImageCost(outputExact, outputToken, imageOutputTokenEstimate)
+	mi.PromptPerMillion = inputToken * 1e6
+	mi.CompletionPerMillion = outputToken * 1e6
+	mi.EstimatedImageCost = roundCost(mi.InputImageCost + mi.OutputImageCost)
+
+	return mi
+}
+
+// bestImagePrice finds the cheapest published price for a billable line across
+// a model's provider endpoints. exact is the per-image price (unit "image" or
+// "megapixel") when OpenRouter publishes one; perToken is the lowest per-token
+// rate. Either may be zero when no such price is published.
+func bestImagePrice(pricing []openRouterImageEndpoint, billable string) (exact, perToken float64) {
+	for _, ep := range pricing {
+		for _, p := range ep.Pricing {
+			if p.Billable != billable || p.CostUSD <= 0 {
+				continue
+			}
+			switch p.Unit {
+			case "image", "megapixel":
+				if exact == 0 || p.CostUSD < exact {
+					exact = p.CostUSD
+				}
+			case "token":
+				if perToken == 0 || p.CostUSD < perToken {
+					perToken = p.CostUSD
+				}
+			}
+		}
+	}
+	return exact, perToken
+}
+
+// perImageCost converts a billable line into the cost of one image. An exact
+// per-image price is used when published; otherwise the cost is estimated from
+// the per-token rate and the expected token count for one image. known reports
+// whether the returned cost is an exact published price.
+func perImageCost(exact, perToken, tokenEstimate float64) (cost float64, known bool) {
+	if exact > 0 {
+		return exact, true
+	}
+	return perToken * tokenEstimate, false
 }
 
 // roundCost rounds a computed cost to six decimal places to avoid floating
@@ -916,6 +928,13 @@ func (a *api) processWithOpenRouter(img []byte, contentType, prompt string) ([]b
 		return nil, 0, errors.New("OpenRouter response exceeded the 25 MB size limit")
 	}
 	if resp.StatusCode != http.StatusOK {
+		// Models such as the OpenAI gpt-image family and qwen-image only run
+		// through OpenRouter's dedicated images endpoint. When OpenRouter
+		// rejects the chat/completions call for the selected model, retry the
+		// processing through the images endpoint instead.
+		if resp.StatusCode == http.StatusNotFound && isImageModelChatRejection(respBody) {
+			return a.processWithImagesAPI(img, contentType, prompt)
+		}
 		return nil, 0, fmt.Errorf("OpenRouter returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	if len(respBody) == 0 {
@@ -929,9 +948,133 @@ func (a *api) processWithOpenRouter(img []byte, contentType, prompt string) ([]b
 	return img, extractCost(respBody, resp.Header), nil
 }
 
-// extractCost returns the US-dollar cost of an OpenRouter chat completion
-// request, taken from the usage.cost field of the response body and falling
-// back to the X-Request-Cost response header when the body does not carry it.
+// isImageModelChatRejection reports whether OpenRouter refused the
+// chat/completions call because the selected model only runs through the
+// dedicated images endpoint. The refusal appears either as an explicit "cannot
+// be used with the chat/completions endpoint" message or, when the request
+// asks for image output modalities, as a "no endpoints found" 404.
+func isImageModelChatRejection(respBody []byte) bool {
+	lower := bytes.ToLower(respBody)
+	return bytes.Contains(lower, []byte("chat/completions")) ||
+		bytes.Contains(lower, []byte("output modalities"))
+}
+
+// processWithImagesAPI sends the image to the configured OpenRouter image model
+// through the dedicated images endpoint, used by models (such as the gpt-image
+// family) that refuse the chat/completions endpoint, and returns the processed
+// image together with the cost of the request in US dollars (0 when OpenRouter
+// did not report one).
+func (a *api) processWithImagesAPI(img []byte, contentType, prompt string) ([]byte, float64, error) {
+	dataURL := "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(img)
+	payload := map[string]any{
+		"model":  a.model,
+		"prompt": prompt,
+		"image_reference": []any{
+			map[string]any{
+				"type":      "image_url",
+				"image_url": map[string]any{"url": dataURL},
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, 0, fmt.Errorf("Failed to build OpenRouter image request: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, a.imagesGenerateURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("Failed to create OpenRouter image request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+a.openRouterKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("OpenRouter image request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxOpenRouterBytes+1))
+	if err != nil {
+		return nil, 0, fmt.Errorf("Failed to read OpenRouter image response: %w", err)
+	}
+	if len(respBody) > maxOpenRouterBytes {
+		return nil, 0, errors.New("OpenRouter image response exceeded the 25 MB size limit")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, 0, fmt.Errorf("OpenRouter image generation returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	if len(respBody) == 0 {
+		return nil, 0, errors.New("OpenRouter returned an empty image generation response; the model may have failed to produce an image. Please try again")
+	}
+
+	img, err = a.extractImagesAPIOutput(respBody)
+	if err != nil {
+		return nil, 0, err
+	}
+	return img, extractCost(respBody, resp.Header), nil
+}
+
+// extractImagesAPIOutput pulls the generated image out of an OpenRouter images
+// endpoint response. Output is an array of image objects that carry either a
+// base64-encoded payload (b64_json) or a URL (a data URL or a remote URL).
+func (a *api) extractImagesAPIOutput(respBody []byte) ([]byte, error) {
+	var out struct {
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return nil, fmt.Errorf("OpenRouter returned an image response that could not be parsed (%v); the model may have failed or returned an unexpected format. Please try again", err)
+	}
+	if len(out.Data) == 0 {
+		return nil, errors.New("OpenRouter image generation returned no images")
+	}
+	for _, d := range out.Data {
+		if d.B64JSON != "" {
+			if img, err := base64.StdEncoding.DecodeString(strings.TrimSpace(d.B64JSON)); err == nil {
+				return img, nil
+			}
+		}
+		if d.URL != "" {
+			if img, ok := decodeDataURL(d.URL); ok {
+				return img, nil
+			}
+			return a.downloadImage(d.URL)
+		}
+	}
+	return nil, errors.New("OpenRouter image generation returned no usable image")
+}
+
+// downloadImage fetches a generated image served from a remote URL returned by
+// the OpenRouter images endpoint.
+func (a *api) downloadImage(imageURL string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download returned status %d", resp.StatusCode)
+	}
+	img, err := io.ReadAll(io.LimitReader(resp.Body, maxOpenRouterBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read image: %w", err)
+	}
+	if len(img) > maxOpenRouterBytes {
+		return nil, errors.New("generated image exceeded the 25 MB size limit")
+	}
+	return img, nil
+}
+
+// extractCost returns the US-dollar cost of an OpenRouter request, taken from
+// the usage.cost field of the response body and falling back to the
+// X-Request-Cost response header when the body does not carry it.
 func extractCost(respBody []byte, hdr http.Header) float64 {
 	var chat struct {
 		Usage struct {
@@ -1048,8 +1191,7 @@ func (a *api) storeResult(img []byte, output string) (string, error) {
 
 	imageFile := output
 	if imageFile == "" {
-		contentType := http.DetectContentType(img)
-		imageFile = "img-" + uniqueName() + extensionForContentType(contentType)
+		imageFile = "img-" + uniqueName() + extensionForContent(img)
 	} else {
 		// The filename is matched against a single path segment so directory
 		// traversal is not possible.
@@ -1074,6 +1216,17 @@ func uniqueName() string {
 	return time.Now().UTC().Format("20060102-150405") + "-" + hex.EncodeToString(b[:])
 }
 
+// extensionForContent picks the file extension for a generated image, detecting
+// vector (SVG) output by its markup before falling back to content sniffing.
+func extensionForContent(img []byte) string {
+	trimmed := bytes.TrimLeft(img, " \t\r\n")
+	if bytes.HasPrefix(trimmed, []byte("<svg")) ||
+		(bytes.HasPrefix(trimmed, []byte("<?xml")) && bytes.Contains(trimmed, []byte("<svg"))) {
+		return ".svg"
+	}
+	return extensionForContentType(http.DetectContentType(img))
+}
+
 // extensionForContentType maps a MIME content type to a file extension.
 func extensionForContentType(ct string) string {
 	switch {
@@ -1087,6 +1240,8 @@ func extensionForContentType(ct string) string {
 		return ".webp"
 	case strings.Contains(ct, "bmp"):
 		return ".bmp"
+	case strings.Contains(ct, "svg"):
+		return ".svg"
 	default:
 		return ".img"
 	}

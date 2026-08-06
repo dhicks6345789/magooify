@@ -167,7 +167,7 @@
         },
         "/api/v1/models": {
             "get": {
-                "description": "Lists OpenRouter models that can process an image and return a processed image, with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.",
+                "description": "Lists OpenRouter models that can process an image and return a processed image, with the cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when OpenRouter publishes them; otherwise costs are estimated from the per-token rates.",
                 "produces": [
                     "application/json"
                 ],

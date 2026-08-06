@@ -1206,6 +1206,116 @@ func TestProcessImageNoReportedCost(t *testing.T) {
 	}
 }
 
+func TestProcessImageFallsBackToImagesEndpoint(t *testing.T) {
+	processedPNG := base64.StdEncoding.EncodeToString(miniPNG)
+	chatPath := "/chat"
+	imagesPath := "/images"
+	imageRequests := 0
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case chatPath:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":{"message":"This model cannot be used with the chat/completions endpoint. Use the /api/v1/images endpoint instead."}}`)
+		case imagesPath:
+			imageRequests++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode images request: %v", err)
+			}
+			if body["model"] != "openai/gpt-image-1-mini" {
+				t.Errorf("images model = %v, want openai/gpt-image-1-mini", body["model"])
+			}
+			if body["prompt"] == "" {
+				t.Errorf("images prompt missing")
+			}
+			if refs, ok := body["image_reference"].([]any); !ok || len(refs) != 1 {
+				t.Errorf("expected an image_reference with the source image, got %v", body["image_reference"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Request-Cost", "0.02")
+			fmt.Fprintf(w, `{"id":"gen-1","model":"openai/gpt-image-1-mini","data":[{"b64_json":"%s"}]}`, processedPNG)
+		default:
+			t.Errorf("unexpected request path %q", r.URL.Path)
+		}
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.model = "openai/gpt-image-1-mini"
+	a.openRouterURL = fake.URL + chatPath
+	a.imagesGenerateURL = fake.URL + imagesPath
+	a.outputDir = t.TempDir()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(miniPNG)
+	mw.Close()
+
+	handler := buildHandler(a, nil)
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("process status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	if imageRequests != 1 {
+		t.Errorf("images endpoint calls = %d, want 1", imageRequests)
+	}
+	var processed ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &processed); err != nil {
+		t.Fatalf("failed to parse process response: %v", err)
+	}
+	if processed.Cost != 0.02 {
+		t.Errorf("cost = %v, want 0.02 from the images response header", processed.Cost)
+	}
+	stored, err := os.ReadFile(filepath.Join(a.outputDir, processed.Filename))
+	if err != nil {
+		t.Fatalf("failed to read stored image: %v", err)
+	}
+	if !bytes.Equal(stored, miniPNG) {
+		t.Errorf("stored bytes do not match the images endpoint output")
+	}
+}
+
+func TestProcessImageNoChatFallbackForOtherErrors(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, `{"error":{"message":"rate limited"}}`)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.imagesGenerateURL = fake.URL + "/images"
+	a.outputDir = t.TempDir()
+
+	req := httptest.NewRequest("POST", "/api/v1/process",
+		strings.NewReader(`{"image":"data:image/png;base64,`+base64.StdEncoding.EncodeToString(miniPNG)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusBadGateway, rr.Body.String())
+	}
+	var resp ErrorResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !strings.Contains(resp.Error, "status 429") {
+		t.Errorf("error = %q, want the upstream 429 error surfaced", resp.Error)
+	}
+}
+
 func TestExtractCost(t *testing.T) {
 	hdr := http.Header{"X-Request-Cost": []string{"0.5"}}
 
@@ -1227,98 +1337,39 @@ func TestExtractCost(t *testing.T) {
 	}
 }
 
-func TestBuildModelListFiltersAndEstimates(t *testing.T) {
-	rows := []openRouterModel{
-		// Image in, image out, with exact per-image prices published via
-		// display_pricing entries billed per image.
-		{
-			ID:   "google/exact-img-model",
-			Name: "Exact Image Model",
-			Architecture: struct {
-				Input  []string `json:"input_modalities"`
-				Output []string `json:"output_modalities"`
-			}{Input: []string{"image", "text"}, Output: []string{"image", "text"}},
-			Pricing: openRouterPricing{
-				Prompt:      "0.00000025",
-				Completion:  "0.0000015",
-				Image:       "0.0004",
-				ImageOutput: "0.03",
-				DisplayPrices: []openRouterDisplayPrice{
-					{Kind: "unit", SKULabel: "Image Input", Price: "0.0004", UnitLabel: "/image"},
-					{Kind: "unit", SKULabel: "Image Output", Price: "0.03", UnitLabel: "/image"},
-				},
-			},
-		},
-		// Image in, text out, billed per token only.
-		{
-			ID:   "openai/vision-text-model",
-			Name: "Vision Text Model",
-			Architecture: struct {
-				Input  []string `json:"input_modalities"`
-				Output []string `json:"output_modalities"`
-			}{Input: []string{"text", "image"}, Output: []string{"text"}},
-			Pricing: openRouterPricing{Prompt: "0.0000025", Completion: "0.00001"},
-		},
-		// Image in, image out, but no per-image price published; the cost is
-		// estimated from the per-token rates.
-		{
-			ID:   "meta/image-token-model",
-			Name: "Image Token Model",
-			Architecture: struct {
-				Input  []string `json:"input_modalities"`
-				Output []string `json:"output_modalities"`
-			}{Input: []string{"image"}, Output: []string{"image", "text"}},
-			Pricing: openRouterPricing{Prompt: "0.0000001", Completion: "0.0000004"},
-		},
-		// Text-only model must be excluded.
-		{
-			ID:   "anthropic/text-only",
-			Name: "Text Only",
-			Architecture: struct {
-				Input  []string `json:"input_modalities"`
-				Output []string `json:"output_modalities"`
-			}{Input: []string{"text"}, Output: []string{"text"}},
-			Pricing: openRouterPricing{Prompt: "0.0000001", Completion: "0.0000004"},
-		},
-		// Router model: advertises image in/out but publishes no price (the -1
-		// sentinel), so there is no per-image cost to show.
-		{
-			ID:   "openrouter/auto",
-			Name: "Auto Router",
-			Architecture: struct {
-				Input  []string `json:"input_modalities"`
-				Output []string `json:"output_modalities"`
-			}{Input: []string{"image", "text"}, Output: []string{"image", "text"}},
-			Pricing: openRouterPricing{Prompt: "-1", Completion: "-1"},
-		},
+func TestBuildImageModelInfo(t *testing.T) {
+	mk := func(input, output []string) openRouterImageModel {
+		m := openRouterImageModel{ID: "model/id", Name: "Model"}
+		m.Architecture.Input = input
+		m.Architecture.Output = output
+		return m
 	}
 
-	models := buildModelList(rows)
-	if len(models) != 2 {
-		t.Fatalf("buildModelList kept %d models, want 2 (router, text-only and text-output excluded)", len(models))
-	}
-
-	exact := models[0]
-	if exact.ID != "google/exact-img-model" {
-		t.Fatalf("models[0] = %q, want the exact-priced model", exact.ID)
-	}
+	// Model with an exact per-image price published for both lines.
+	exact := buildImageModelInfo(mk([]string{"image", "text"}, []string{"image", "text"}), []openRouterImageEndpoint{
+		{ProviderName: "Provider A", Pricing: []openRouterImagePrice{
+			{Billable: "input_image", Unit: "image", CostUSD: 0.0004},
+			{Billable: "output_image", Unit: "image", CostUSD: 0.03},
+		}},
+	})
 	if !exact.InputImageCostKnown || !exact.OutputImageCostKnown {
 		t.Errorf("exact model flags = %+v, want all true", exact)
 	}
 	if exact.InputImageCost != 0.0004 || exact.OutputImageCost != 0.03 {
 		t.Errorf("exact costs = input %v output %v, want 0.0004 / 0.03", exact.InputImageCost, exact.OutputImageCost)
 	}
-	if exact.PromptPerMillion != 0.25 || exact.CompletionPerMillion != 1.5 {
-		t.Errorf("per-million prices = %v / %v, want 0.25 / 1.5", exact.PromptPerMillion, exact.CompletionPerMillion)
-	}
 	if exact.EstimatedImageCost != 0.0304 {
 		t.Errorf("estimated cost = %v, want 0.0304", exact.EstimatedImageCost)
 	}
 
-	token := models[1]
-	if token.ID != "meta/image-token-model" {
-		t.Fatalf("models[1] = %q, want the per-token-priced model", token.ID)
-	}
+	// Model with only per-token rates: cost is estimated from the expected
+	// token count for one image.
+	token := buildImageModelInfo(mk([]string{"image"}, []string{"image", "text"}), []openRouterImageEndpoint{
+		{ProviderName: "Provider A", Pricing: []openRouterImagePrice{
+			{Billable: "input_image", Unit: "token", CostUSD: 0.0000001},
+			{Billable: "output_image", Unit: "token", CostUSD: 0.0000004},
+		}},
+	})
 	if token.InputImageCostKnown || token.OutputImageCostKnown {
 		t.Errorf("token model should not have exact per-image prices")
 	}
@@ -1328,22 +1379,55 @@ func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 	if want := 0.0000004 * imageOutputTokenEstimate; math.Abs(token.OutputImageCost-want) > 1e-12 {
 		t.Errorf("estimated output cost = %v, want %v", token.OutputImageCost, want)
 	}
-	if token.EstimatedImageCost != roundCost(token.InputImageCost+token.OutputImageCost) {
-		t.Errorf("estimated cost = %v, want input+output", token.EstimatedImageCost)
+
+	// The cheapest provider price wins for each line.
+	cheap := buildImageModelInfo(mk([]string{"image"}, []string{"image"}), []openRouterImageEndpoint{
+		{ProviderName: "A", Pricing: []openRouterImagePrice{{Billable: "output_image", Unit: "image", CostUSD: 0.5}}},
+		{ProviderName: "B", Pricing: []openRouterImagePrice{{Billable: "output_image", Unit: "image", CostUSD: 0.08}}},
+	})
+	if cheap.OutputImageCost != 0.08 || !cheap.OutputImageCostKnown {
+		t.Errorf("cheapest provider cost = %v (known %v), want 0.08/true", cheap.OutputImageCost, cheap.OutputImageCostKnown)
+	}
+
+	// An input_reference price stands in for the input image price.
+	ref := buildImageModelInfo(mk([]string{"image"}, []string{"image"}), []openRouterImageEndpoint{
+		{ProviderName: "A", Pricing: []openRouterImagePrice{
+			{Billable: "input_reference", Unit: "image", CostUSD: 0.12},
+			{Billable: "output_image", Unit: "image", CostUSD: 0.3},
+		}},
+	})
+	if ref.InputImageCost != 0.12 || !ref.InputImageCostKnown {
+		t.Errorf("input_reference cost = %v (known %v), want 0.12/true", ref.InputImageCost, ref.InputImageCostKnown)
+	}
+
+	// No pricing published: costs are zero and not marked exact.
+	none := buildImageModelInfo(mk([]string{"image"}, []string{"image"}), nil)
+	if none.InputImageCost != 0 || none.OutputImageCost != 0 || none.InputImageCostKnown || none.OutputImageCostKnown {
+		t.Errorf("no-pricing model = %+v, want zero, unknown costs", none)
 	}
 }
 
 func TestModelsEndpointAndCache(t *testing.T) {
-	body := `{"data":[
+	endpoints := map[string]string{
+		"gemini-3.1-flash-lite-image": `{"endpoints":[{"provider_name":"OpenRouter","pricing":[
+			{"billable":"input_image","unit":"token","cost_usd":0.00000025},
+			{"billable":"output_image","unit":"token","cost_usd":0.00003}
+		]}]}`,
+		"gpt-4o": `{"endpoints":[{"provider_name":"OpenRouter","pricing":[
+			{"billable":"input_image","unit":"token","cost_usd":0.0000025},
+			{"billable":"output_image","unit":"token","cost_usd":0.00001}
+		]}]}`,
+	}
+	const listBody = `{"data":[
 		{"id":"google/gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite",
 		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
-		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.00003"}},
+		 "endpoints":"/api/v1/images/models/google/gemini-3.1-flash-lite-image/endpoints"},
 		{"id":"openai/gpt-4o","name":"GPT-4o",
 		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
-		 "pricing":{"prompt":"0.0000025","completion":"0.00001"}},
+		 "endpoints":"/api/v1/images/models/openai/gpt-4o/endpoints"},
 		{"id":"anthropic/claude-text","name":"Text Only",
 		 "architecture":{"input_modalities":["text"],"output_modalities":["text"]},
-		 "pricing":{"prompt":"0.000003","completion":"0.000015"}}
+		 "endpoints":""}
 	]}`
 	hits := 0
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1351,16 +1435,23 @@ func TestModelsEndpointAndCache(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {
 			t.Errorf("request Authorization header = %q, want the configured key", r.Header.Get("Authorization"))
 		}
-		if r.URL.Query().Get("limit") != "1000" {
-			t.Errorf("limit query = %q, want 1000", r.URL.Query().Get("limit"))
-		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, body)
+		if strings.HasSuffix(r.URL.Path, "/endpoints") {
+			for id, body := range endpoints {
+				if strings.Contains(r.URL.Path, id) {
+					fmt.Fprint(w, body)
+					return
+				}
+			}
+			http.Error(w, "no such model", http.StatusNotFound)
+			return
+		}
+		fmt.Fprint(w, listBody)
 	}))
 	defer fake.Close()
 
 	a := newAPI(false, docsFS)
-	a.modelsURL = fake.URL
+	a.imagesURL = fake.URL
 	a.openRouterKey = "test-key"
 
 	// First request hits the upstream and returns models sorted by cost.
@@ -1387,11 +1478,12 @@ func TestModelsEndpointAndCache(t *testing.T) {
 		t.Errorf("models[1] = %q, want the image-output model second", resp.Models[1].ID)
 	}
 
-	// A second request within the TTL must come from the cache.
+	// A second request within the TTL must come from the cache. The first pass
+	// made one list request plus one endpoints request per image model (3).
 	rr2 := httptest.NewRecorder()
 	a.models(rr2, req)
-	if hits != 1 {
-		t.Errorf("upstream hit count = %d, want 1 (second call cached)", hits)
+	if hits != 3 {
+		t.Errorf("upstream hit count = %d, want 3 (list + 2 endpoints, then cached)", hits)
 	}
 
 	// Expiring the cache forces a refetch.
@@ -1403,8 +1495,8 @@ func TestModelsEndpointAndCache(t *testing.T) {
 	if rr3.Code != http.StatusOK {
 		t.Fatalf("refetch status = %d, want %d", rr3.Code, http.StatusOK)
 	}
-	if hits != 2 {
-		t.Errorf("upstream hit count = %d, want 2 after cache expiry", hits)
+	if hits != 6 {
+		t.Errorf("upstream hit count = %d, want 6 after cache expiry", hits)
 	}
 }
 
@@ -1415,7 +1507,7 @@ func TestModelsEndpointUpstreamFailure(t *testing.T) {
 	defer fake.Close()
 
 	a := newAPI(false, docsFS)
-	a.modelsURL = fake.URL
+	a.imagesURL = fake.URL
 	a.openRouterKey = "test-key"
 
 	req := httptest.NewRequest("GET", "/api/v1/models", nil)
@@ -1453,33 +1545,25 @@ func TestModelsEndpointRequiresKey(t *testing.T) {
 	}
 }
 
-func TestModelsEndpointPaginates(t *testing.T) {
-	page1 := `{"data":[
-		{"id":"google/gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite",
-		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
-		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.00003"}}
-	],"links":{"next":"__NEXT__"}}`
-	page2 := `{"data":[
-		{"id":"google/gemini-3-pro-image-preview","name":"Gemini 3 Pro Image (Preview)",
-		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
-		 "pricing":{"prompt":"0.000002","completion":"0.000014","image_output":"0.00012"}}
-	],"links":{"next":""}}`
-
-	var fake *httptest.Server
-	handled := 0
-	fake = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handled++
+func TestModelsEndpointEndpointsFailure(t *testing.T) {
+	listBody := `{"data":[
+		{"id":"recraft/recraft-v4.1-vector","name":"Recraft V4.1 Vector",
+		 "architecture":{"input_modalities":["image"],"output_modalities":["image"]},
+		 "endpoints":"/api/v1/images/models/recraft/recraft-v4.1-vector/endpoints"}
+	]}`
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Query().Get("offset") != "" {
-			fmt.Fprint(w, page2)
+		if strings.HasSuffix(r.URL.Path, "/endpoints") {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"error":"boom"}`)
 			return
 		}
-		fmt.Fprint(w, strings.Replace(page1, "__NEXT__", fake.URL+"?limit=1000&offset=1", 1))
+		fmt.Fprint(w, listBody)
 	}))
 	defer fake.Close()
 
 	a := newAPI(false, docsFS)
-	a.modelsURL = fake.URL
+	a.imagesURL = fake.URL
 	a.openRouterKey = "test-key"
 
 	req := httptest.NewRequest("GET", "/api/v1/models", nil)
@@ -1492,60 +1576,54 @@ func TestModelsEndpointPaginates(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if handled != 2 {
-		t.Errorf("upstream requests = %d, want 2 (next page followed)", handled)
+	if len(resp.Models) != 1 {
+		t.Fatalf("got %d models, want 1 (endpoints failure must not drop the model)", len(resp.Models))
 	}
-	if len(resp.Models) != 2 {
-		t.Fatalf("got %d models, want 2 from both pages", len(resp.Models))
+	if resp.Models[0].ID != "recraft/recraft-v4.1-vector" {
+		t.Errorf("model = %q, want the recraft model", resp.Models[0].ID)
 	}
-	ids := map[string]bool{}
-	for _, m := range resp.Models {
-		ids[m.ID] = true
-	}
-	if !ids["google/gemini-3-pro-image-preview"] || !ids["google/gemini-3.1-flash-lite-image"] {
-		t.Errorf("models = %v, want both page models", ids)
+	if resp.Models[0].InputImageCost != 0 || resp.Models[0].OutputImageCost != 0 {
+		t.Errorf("model costs = %+v, want zero when pricing is unavailable", resp.Models[0])
 	}
 }
 
-func TestPerImagePrice(t *testing.T) {
-	prices := []openRouterDisplayPrice{
-		{Kind: "token", SKULabel: "Image Output", Price: "0.00003", UnitLabel: "/M tokens"},
-		{Kind: "unit", SKULabel: "Image Output", Price: "0.3", UnitLabel: "/image"},
-		{Kind: "unit", SKULabel: "Web Search", Price: "0.014", UnitLabel: "/request"},
+func TestBestImagePrice(t *testing.T) {
+	pricing := []openRouterImageEndpoint{
+		{ProviderName: "A", Pricing: []openRouterImagePrice{
+			{Billable: "output_image", Unit: "token", CostUSD: 0.00003},
+			{Billable: "output_image", Unit: "image", CostUSD: 0.3},
+			{Billable: "web_search", Unit: "request", CostUSD: 0.014},
+		}},
+		{ProviderName: "B", Pricing: []openRouterImagePrice{
+			{Billable: "output_image", Unit: "image", CostUSD: 0.08},
+		}},
 	}
 
-	if p, ok := perImagePrice(prices, "Image Output"); !ok || p != 0.3 {
-		t.Errorf("perImagePrice(Image Output) = %v/%v, want 0.3/true", p, ok)
+	exact, perToken := bestImagePrice(pricing, "output_image")
+	if exact != 0.08 {
+		t.Errorf("bestImagePrice exact = %v, want 0.08 (cheapest per-image)", exact)
 	}
-	// The token-billed entry must be ignored.
-	if p, ok := perImagePrice([]openRouterDisplayPrice{prices[0]}, "Image Output"); ok {
-		t.Errorf("perImagePrice(token entry) = %v/%v, want 0/false", p, ok)
+	if perToken != 0.00003 {
+		t.Errorf("bestImagePrice perToken = %v, want 0.00003", perToken)
 	}
-	// A non-image unit entry must not match.
-	if p, ok := perImagePrice([]openRouterDisplayPrice{prices[2]}, "Image Output"); ok {
-		t.Errorf("perImagePrice(non-image) = %v/%v, want 0/false", p, ok)
+
+	// A billable line with no matching entry yields zeros.
+	if exact, perToken := bestImagePrice(pricing, "input_image"); exact != 0 || perToken != 0 {
+		t.Errorf("bestImagePrice(input_image) = %v/%v, want 0/0", exact, perToken)
 	}
-	// No entry at all.
-	if p, ok := perImagePrice(nil, "Image Output"); ok {
-		t.Errorf("perImagePrice(none) = %v/%v, want 0/false", p, ok)
-	}
-	// Label matching is case-insensitive.
-	if p, ok := perImagePrice([]openRouterDisplayPrice{{Kind: "unit", SKULabel: "image output", Price: "0.25", UnitLabel: "/image"}}, "Image Output"); !ok || p != 0.25 {
-		t.Errorf("perImagePrice(case) = %v/%v, want 0.25/true", p, ok)
+	if exact, perToken := bestImagePrice(nil, "output_image"); exact != 0 || perToken != 0 {
+		t.Errorf("bestImagePrice(none) = %v/%v, want 0/0", exact, perToken)
 	}
 }
 
-func TestParsePriceNegativeSentinel(t *testing.T) {
-	if got := parsePrice("-1"); got != 0 {
-		t.Errorf("parsePrice(-1) = %v, want 0 (not-available sentinel)", got)
+func TestPerImageCost(t *testing.T) {
+	if cost, known := perImageCost(0.08, 0.00003, imageOutputTokenEstimate); cost != 0.08 || !known {
+		t.Errorf("perImageCost(exact) = %v/%v, want 0.08/true", cost, known)
 	}
-	if got := parsePrice("0"); got != 0 {
-		t.Errorf("parsePrice(0) = %v, want 0", got)
+	if cost, known := perImageCost(0, 0.00003, imageOutputTokenEstimate); cost != 0.00003*imageOutputTokenEstimate || known {
+		t.Errorf("perImageCost(token) = %v/%v, want estimate/false", cost, known)
 	}
-	if got := parsePrice("0.00000025"); got != 0.00000025 {
-		t.Errorf("parsePrice(valid) = %v, want 0.00000025", got)
-	}
-	if got := parsePrice("oops"); got != 0 {
-		t.Errorf("parsePrice(malformed) = %v, want 0", got)
+	if cost, known := perImageCost(0, 0, imageOutputTokenEstimate); cost != 0 || known {
+		t.Errorf("perImageCost(none) = %v/%v, want 0/false", cost, known)
 	}
 }
