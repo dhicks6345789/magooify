@@ -15,6 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultTime = document.getElementById('result-time');
 
   const dropZone = document.getElementById('drop-zone');
+  const previewFrame = document.getElementById('preview-frame');
+  const cropBox = document.getElementById('crop-box');
+  const cropTip = document.getElementById('crop-tip');
+  const btnClearCrop = document.getElementById('btn-clear-crop');
 
   const cameraModal = document.getElementById('cameraModal');
   const cameraVideo = document.getElementById('camera-video');
@@ -27,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let cameraStream = null;
   let currentBlob = null;
+  let cropRect = null;
 
   async function fetchJSON(url, options) {
     const res = await fetch(url, options);
@@ -100,7 +105,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modal) modal.hide();
   });
 
-  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('click', () => {
+    if (previewWrap.classList.contains('d-none')) fileInput.click();
+  });
 
   ['dragenter', 'dragover'].forEach((evt) => {
     dropZone.addEventListener(evt, (e) => {
@@ -137,6 +144,162 @@ document.addEventListener('DOMContentLoaded', () => {
     fileInput.value = '';
   });
 
+  // imageDisplayRect returns the on-screen rect (in CSS pixels) that the image
+  // content actually occupies inside the preview element, after object-fit:
+  // contain letterboxing, together with the image's natural dimensions.
+  function imageDisplayRect() {
+    const nw = preview.naturalWidth;
+    const nh = preview.naturalHeight;
+    const cw = preview.clientWidth;
+    const ch = preview.clientHeight;
+    if (!nw || !nh || !cw || !ch) return null;
+    const scale = Math.min(cw / nw, ch / nh);
+    const w = nw * scale;
+    const h = nh * scale;
+    return { x: (cw - w) / 2, y: (ch - h) / 2, w, h, nw, nh };
+  }
+
+  // toImageCoords maps a pointer position to natural image pixel coordinates.
+  function toImageCoords(clientX, clientY) {
+    const frameRect = previewFrame.getBoundingClientRect();
+    const d = imageDisplayRect();
+    if (!d) return null;
+    const px = clientX - frameRect.left;
+    const py = clientY - frameRect.top;
+    return {
+      x: Math.max(0, Math.min(d.nw, ((px - d.x) / d.w) * d.nw)),
+      y: Math.max(0, Math.min(d.nh, ((py - d.y) / d.h) * d.nh)),
+    };
+  }
+
+  function clampCrop(c) {
+    const nw = preview.naturalWidth;
+    const nh = preview.naturalHeight;
+    const minW = Math.max(8, nw * 0.02);
+    const minH = Math.max(8, nh * 0.02);
+    const x = Math.max(0, Math.min(c.x, nw - minW));
+    const y = Math.max(0, Math.min(c.y, nh - minH));
+    return {
+      x,
+      y,
+      w: Math.max(minW, Math.min(c.w, nw - x)),
+      h: Math.max(minH, Math.min(c.h, nh - y)),
+    };
+  }
+
+  function renderCropBox() {
+    const d = imageDisplayRect();
+    if (!d || !cropRect) {
+      cropBox.style.display = 'none';
+      return;
+    }
+    cropBox.style.display = 'block';
+    cropBox.style.left = (cropRect.x / d.nw) * d.w + d.x + 'px';
+    cropBox.style.top = (cropRect.y / d.nh) * d.h + d.y + 'px';
+    cropBox.style.width = (cropRect.w / d.nw) * d.w + 'px';
+    cropBox.style.height = (cropRect.h / d.nh) * d.h + 'px';
+  }
+
+  function updateCropTip() {
+    if (!cropRect) {
+      cropTip.textContent = 'Drag on the image to crop.';
+      btnClearCrop.classList.add('d-none');
+    } else {
+      cropTip.textContent = 'Drag an edge or corner to adjust the crop.';
+      btnClearCrop.classList.remove('d-none');
+    }
+  }
+
+  btnClearCrop.addEventListener('click', () => {
+    cropRect = null;
+    renderCropBox();
+    updateCropTip();
+  });
+
+  let cropDrag = null;
+
+  previewFrame.addEventListener('pointerdown', (e) => {
+    if (!currentBlob) return;
+    const coords = toImageCoords(e.clientX, e.clientY);
+    if (!coords) return;
+    const handle = e.target.closest('.crop-handle');
+    if (handle) {
+      cropDrag = {
+        mode: 'resize',
+        handle: handle.dataset.handle,
+        start: coords,
+        orig: cropRect ? { ...cropRect } : null,
+      };
+    } else if (
+      cropRect &&
+      coords.x >= cropRect.x &&
+      coords.x <= cropRect.x + cropRect.w &&
+      coords.y >= cropRect.y &&
+      coords.y <= cropRect.y + cropRect.h
+    ) {
+      cropDrag = { mode: 'move', start: coords, orig: { ...cropRect } };
+    } else {
+      cropDrag = { mode: 'new', start: coords, orig: null };
+      cropRect = { x: coords.x, y: coords.y, w: 0, h: 0 };
+    }
+    previewFrame.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  previewFrame.addEventListener('pointermove', (e) => {
+    if (!cropDrag) return;
+    const coords = toImageCoords(e.clientX, e.clientY);
+    if (!coords) return;
+    if (cropDrag.mode === 'new') {
+      cropRect = {
+        x: Math.min(cropDrag.start.x, coords.x),
+        y: Math.min(cropDrag.start.y, coords.y),
+        w: Math.abs(coords.x - cropDrag.start.x),
+        h: Math.abs(coords.y - cropDrag.start.y),
+      };
+    } else if (cropDrag.mode === 'move') {
+      cropRect = {
+        x: cropDrag.orig.x + coords.x - cropDrag.start.x,
+        y: cropDrag.orig.y + coords.y - cropDrag.start.y,
+        w: cropDrag.orig.w,
+        h: cropDrag.orig.h,
+      };
+    } else if (cropDrag.mode === 'resize' && cropDrag.orig) {
+      const o = cropDrag.orig;
+      let { x, y, w, h } = o;
+      const hd = cropDrag.handle;
+      if (hd.includes('e')) w = coords.x - o.x;
+      if (hd.includes('s')) h = coords.y - o.y;
+      if (hd.includes('w')) {
+        x = coords.x;
+        w = o.x + o.w - coords.x;
+      }
+      if (hd.includes('n')) {
+        y = coords.y;
+        h = o.y + o.h - coords.y;
+      }
+      cropRect = { x, y, w, h };
+    }
+    cropRect = clampCrop(cropRect);
+    renderCropBox();
+    updateCropTip();
+  });
+
+  function endCropDrag() {
+    if (!cropDrag) return;
+    cropDrag = null;
+    if (cropRect && (cropRect.w < 8 || cropRect.h < 8)) {
+      cropRect = null;
+      renderCropBox();
+      updateCropTip();
+    }
+  }
+
+  previewFrame.addEventListener('pointerup', endCropDrag);
+  previewFrame.addEventListener('pointercancel', endCropDrag);
+  window.addEventListener('resize', renderCropBox);
+  preview.addEventListener('load', renderCropBox);
+
   async function downscaleImage(file) {
     const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
@@ -156,11 +319,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function setImage(blob, name) {
     currentBlob = blob;
+    cropRect = null;
+    cropDrag = null;
     preview.src = URL.createObjectURL(blob);
     previewWrap.classList.remove('d-none');
     noImage.classList.add('d-none');
     btnProcess.disabled = false;
     processStatus.textContent = name;
+    renderCropBox();
+    updateCropTip();
+  }
+
+  // croppedBlob returns a blob containing only the region inside the crop box.
+  // When no crop is set the original blob is returned unchanged.
+  async function croppedBlob(blob) {
+    if (!cropRect) return blob;
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(cropRect.w));
+    canvas.height = Math.max(1, Math.round(cropRect.h));
+    canvas.getContext('2d').drawImage(
+      bmp,
+      cropRect.x,
+      cropRect.y,
+      cropRect.w,
+      cropRect.h,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+    bmp.close();
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('Failed to encode image'))),
+        'image/jpeg',
+        0.92
+      );
+    });
   }
 
   btnProcess.addEventListener('click', async () => {
@@ -168,8 +364,9 @@ document.addEventListener('DOMContentLoaded', () => {
     btnProcess.disabled = true;
     processStatus.textContent = 'Processing...';
     try {
+      const sendBlob = await croppedBlob(currentBlob);
       const form = new FormData();
-      form.append('image', currentBlob, 'capture.jpg');
+      form.append('image', sendBlob, 'capture.jpg');
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
       resultImage.src = 'api/v1/images/' + encodeURIComponent(data.filename);
       resultFilename.textContent = data.filename;

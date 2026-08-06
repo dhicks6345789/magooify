@@ -32,7 +32,23 @@
         <div class="card-body">
           <div id="drop-zone" class="drop-zone">
             <div id="preview-wrap" class="preview-wrap d-none">
-              <img id="preview" alt="Selected image" class="preview-img" />
+              <div id="preview-frame" class="preview-frame">
+                <img id="preview" alt="Selected image" class="preview-img" draggable="false" />
+                <div id="crop-box" class="crop-box" style="display:none">
+                  <div class="crop-handle crop-handle-nw" data-handle="nw"></div>
+                  <div class="crop-handle crop-handle-n" data-handle="n"></div>
+                  <div class="crop-handle crop-handle-ne" data-handle="ne"></div>
+                  <div class="crop-handle crop-handle-e" data-handle="e"></div>
+                  <div class="crop-handle crop-handle-se" data-handle="se"></div>
+                  <div class="crop-handle crop-handle-s" data-handle="s"></div>
+                  <div class="crop-handle crop-handle-sw" data-handle="sw"></div>
+                  <div class="crop-handle crop-handle-w" data-handle="w"></div>
+                </div>
+              </div>
+              <div class="d-flex justify-content-between align-items-center mt-2">
+                <div class="small text-secondary" id="crop-tip">Drag on the image to crop.</div>
+                <button type="button" id="btn-clear-crop" class="btn btn-sm btn-outline-secondary d-none">Clear crop</button>
+              </div>
             </div>
             <div id="no-image" class="text-center text-secondary py-4">
               <div class="fs-5">Drop file here</div>

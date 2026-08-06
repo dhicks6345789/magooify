@@ -47,6 +47,41 @@ body {
   border-radius: 0.35rem;
 }
 
+.preview-frame {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.crop-box {
+  position: absolute;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  cursor: move;
+  z-index: 2;
+  touch-action: none;
+}
+
+.crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border: 1px solid #333;
+  box-sizing: border-box;
+}
+
+.crop-handle-nw { top: -7px; left: -7px; cursor: nwse-resize; }
+.crop-handle-n { top: -7px; left: 50%; margin-left: -6px; cursor: ns-resize; }
+.crop-handle-ne { top: -7px; right: -7px; cursor: nesw-resize; }
+.crop-handle-e { top: 50%; right: -7px; margin-top: -6px; cursor: ew-resize; }
+.crop-handle-se { bottom: -7px; right: -7px; cursor: nwse-resize; }
+.crop-handle-s { bottom: -7px; left: 50%; margin-left: -6px; cursor: ns-resize; }
+.crop-handle-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
+.crop-handle-w { top: 50%; left: -7px; margin-top: -6px; cursor: ew-resize; }
+
 .result-img {
   width: 100%;
   border-radius: 0.5rem;
