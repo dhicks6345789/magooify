@@ -393,7 +393,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (lastOutputFile) form.append('output', lastOutputFile);
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
       lastOutputFile = data.filename;
-      resultImage.src = 'api/v1/images/' + encodeURIComponent(data.filename);
+      resultImage.src =
+        'api/v1/images/' +
+        encodeURIComponent(data.filename) +
+        '?t=' +
+        encodeURIComponent(data.processed_at);
       resultFilename.textContent = data.filename;
       resultModel.textContent = data.model;
       resultTime.textContent = new Date(data.processed_at).toLocaleString();
