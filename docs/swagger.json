@@ -300,7 +300,7 @@
                 },
                 "model": {
                     "type": "string",
-                    "example": "openai/gpt-4o-mini"
+                    "example": "google/gemini-3.1-flash-lite-image"
                 },
                 "processed_at": {
                     "type": "string"

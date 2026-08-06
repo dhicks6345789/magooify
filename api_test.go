@@ -601,8 +601,8 @@ func TestImageProcessingRoutes(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("failed to decode OpenRouter request: %v", err)
 		}
-		if body["model"] != "openai/gpt-4o-mini" {
-			t.Errorf("model = %v, want %q", body["model"], "openai/gpt-4o-mini")
+		if body["model"] != defaultModel {
+			t.Errorf("model = %v, want %q", body["model"], defaultModel)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"choices":[{"message":{"content":"A tiny test image"}}]}`))

@@ -3,105 +3,56 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Magooify - Image Processing</title>
+    <title>Magooify</title>
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <nav class="navbar navbar-expand-lg border-bottom mb-4">
-      <div class="container-fluid">
+    <nav class="navbar border-bottom mb-3">
+      <div class="container">
         <span class="navbar-brand">
           <span class="brand-icon">M</span>
           Magooify
         </span>
-        <div class="d-flex align-items-center gap-2">
-          <a href="docs/api" class="btn btn-sm btn-outline-light">API Docs</a>
-          <span class="badge rounded-pill text-bg-success" id="conn-badge">connected</span>
-          <div class="text-end user-badge" id="user-badge">
-            <div class="fw-semibold" id="user-name">Loading&hellip;</div>
-            <div class="small text-secondary" id="user-mode">&nbsp;</div>
-          </div>
-        </div>
+        <span class="badge rounded-pill text-bg-success" id="conn-badge">connected</span>
       </div>
     </nav>
 
-    <main class="container-fluid">
-      <div class="card mb-4 hero-card">
+    <main class="container" style="max-width: 640px">
+      <div class="card mb-3">
         <div class="card-body">
-          <h2 class="h4 mb-2">Capture &amp; Process Images</h2>
-          <p class="mb-3 text-secondary">
-            Take a photo with your device camera or upload an image file. Magooify sends it to an
-            OpenRouter vision model for processing, then saves the image and the result to a folder
-            on your machine.
-          </p>
-          <div class="d-flex gap-2 flex-wrap">
-            <button type="button" id="btn-camera" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#cameraModal">Take Photo</button>
-            <button type="button" id="btn-upload" class="btn btn-outline-light">Upload Image</button>
-            <input type="file" id="file-input" accept="image/*" hidden />
-          </div>
+          <button type="button" id="btn-camera" class="btn btn-primary btn-lg w-100 mb-2" data-bs-toggle="modal" data-bs-target="#cameraModal">Take Photo</button>
+          <button type="button" id="btn-upload" class="btn btn-outline-light btn-lg w-100">Upload Image</button>
+          <input type="file" id="file-input" accept="image/*" hidden />
         </div>
       </div>
 
-      <div class="row g-3">
-        <div class="col-lg-5">
-          <div class="card h-100">
-            <div class="card-header">
-              <h3 class="h6 mb-0">Current Image</h3>
-            </div>
-            <div class="card-body">
-              <div id="preview-wrap" class="preview-wrap d-none">
-                <img id="preview" alt="Selected image" class="preview-img" />
-              </div>
-              <div id="no-image" class="text-center text-secondary py-5">No image selected</div>
-              <button type="button" id="btn-process" class="btn btn-success w-100 mt-3" disabled>Process with OpenRouter</button>
-              <div id="process-status" class="small mt-2 text-secondary">&nbsp;</div>
-            </div>
+      <div class="card mb-3">
+        <div class="card-body">
+          <div id="preview-wrap" class="preview-wrap d-none">
+            <img id="preview" alt="Selected image" class="preview-img" />
           </div>
-        </div>
-
-        <div class="col-lg-7">
-          <div class="card h-100">
-            <div class="card-header">
-              <h3 class="h6 mb-0">Processing Result</h3>
-            </div>
-            <div class="card-body">
-              <div id="result-placeholder" class="text-center text-secondary py-5">Nothing processed yet</div>
-              <div id="result-body" class="d-none">
-                <div id="result-description" class="code-block mb-0"></div>
-                <dl class="row small mt-3 mb-0">
-                  <dt class="col-4">Image file</dt>
-                  <dd class="col-8 font-monospace" id="result-filename">-</dd>
-                  <dt class="col-4">Description file</dt>
-                  <dd class="col-8 font-monospace" id="result-textfile">-</dd>
-                  <dt class="col-4">Model</dt>
-                  <dd class="col-8 font-monospace" id="result-model">-</dd>
-                  <dt class="col-4">Processed</dt>
-                  <dd class="col-8" id="result-time">-</dd>
-                </dl>
-              </div>
-            </div>
-          </div>
+          <div id="no-image" class="text-center text-secondary py-4">No image selected</div>
+          <button type="button" id="btn-process" class="btn btn-success btn-lg w-100 mt-3" disabled>Process</button>
+          <div id="process-status" class="small mt-2 text-secondary text-center">&nbsp;</div>
         </div>
       </div>
 
-      <div class="card mt-4">
-        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <h3 class="h6 mb-0">Recent Captures</h3>
-          <button type="button" id="btn-refresh" class="btn btn-sm btn-outline-light">Refresh</button>
-        </div>
+      <div id="result-card" class="card mb-3 d-none">
+        <div class="card-header">Processed Image</div>
         <div class="card-body">
-          <div id="gallery" class="row g-3"></div>
-          <div id="gallery-empty" class="text-center text-secondary py-4">No processed images yet.</div>
+          <img id="result-image" alt="Processed image" class="result-img" />
+          <div id="result-description" class="code-block mt-3"></div>
+          <div class="small text-secondary mt-2">
+            <div class="font-monospace" id="result-filename"></div>
+            <div><span id="result-model"></span> &middot; <span id="result-time"></span></div>
+          </div>
         </div>
       </div>
     </main>
 
-    <footer class="footer">
-      <p>Magooify &middot; Camera &amp; upload image processing via OpenRouter &middot; Built with Go &amp; Bootstrap</p>
-    </footer>
-
     <div class="modal fade" id="cameraModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title">Take a Photo</h5>

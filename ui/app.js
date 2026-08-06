@@ -1,10 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const userBadge = document.getElementById('user-badge');
-  const userName = document.getElementById('user-name');
-  const userMode = document.getElementById('user-mode');
   const connBadge = document.getElementById('conn-badge');
 
-  const btnCamera = document.getElementById('btn-camera');
   const btnUpload = document.getElementById('btn-upload');
   const fileInput = document.getElementById('file-input');
   const previewWrap = document.getElementById('preview-wrap');
@@ -13,17 +9,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnProcess = document.getElementById('btn-process');
   const processStatus = document.getElementById('process-status');
 
-  const resultPlaceholder = document.getElementById('result-placeholder');
-  const resultBody = document.getElementById('result-body');
+  const resultCard = document.getElementById('result-card');
+  const resultImage = document.getElementById('result-image');
   const resultDescription = document.getElementById('result-description');
   const resultFilename = document.getElementById('result-filename');
-  const resultTextfile = document.getElementById('result-textfile');
   const resultModel = document.getElementById('result-model');
   const resultTime = document.getElementById('result-time');
-
-  const gallery = document.getElementById('gallery');
-  const galleryEmpty = document.getElementById('gallery-empty');
-  const btnRefresh = document.getElementById('btn-refresh');
 
   const cameraModal = document.getElementById('cameraModal');
   const cameraVideo = document.getElementById('camera-video');
@@ -35,12 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let cameraStream = null;
   let currentBlob = null;
 
-  function escapeHtml(value) {
-    const div = document.createElement('div');
-    div.textContent = value == null ? '' : String(value);
-    return div.innerHTML;
-  }
-
   async function fetchJSON(url, options) {
     const res = await fetch(url, options);
     const data = await res.json();
@@ -50,22 +35,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return data;
   }
 
-  async function loadUser() {
-    try {
-      const data = await fetchJSON('api/v1/user');
-      userName.textContent = data.username;
-      userMode.textContent = `${data.mode} mode (${data.auth_type})`;
-      connBadge.classList.remove('text-bg-danger');
-      connBadge.classList.add('text-bg-success');
-      connBadge.textContent = 'connected';
-      userBadge.style.opacity = '1';
-    } catch (err) {
-      userName.textContent = 'Offline / Disconnected';
-      userMode.textContent = 'connection failed';
-      connBadge.classList.remove('text-bg-success');
-      connBadge.classList.add('text-bg-danger');
-      connBadge.textContent = 'disconnected';
-    }
+  function checkConnection() {
+    fetchJSON('api/v1/health')
+      .then(() => {
+        connBadge.classList.remove('text-bg-danger');
+        connBadge.classList.add('text-bg-success');
+        connBadge.textContent = 'connected';
+      })
+      .catch(() => {
+        connBadge.classList.remove('text-bg-success');
+        connBadge.classList.add('text-bg-danger');
+        connBadge.textContent = 'offline';
+      });
   }
 
   async function startCamera() {
@@ -153,66 +134,31 @@ document.addEventListener('DOMContentLoaded', () => {
     previewWrap.classList.remove('d-none');
     noImage.classList.add('d-none');
     btnProcess.disabled = false;
-    processStatus.textContent = `Ready to process: ${name} (${(blob.size / 1024).toFixed(1)} KB).`;
+    processStatus.textContent = name;
   }
 
   btnProcess.addEventListener('click', async () => {
     if (!currentBlob) return;
     btnProcess.disabled = true;
-    processStatus.textContent = 'Sending image to OpenRouter for processing...';
+    processStatus.textContent = 'Processing...';
     try {
       const form = new FormData();
       form.append('image', currentBlob, 'capture.jpg');
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
+      resultImage.src = 'api/v1/images/' + encodeURIComponent(data.filename);
       resultDescription.textContent = data.description;
       resultFilename.textContent = data.filename;
-      resultTextfile.textContent = data.text_file;
       resultModel.textContent = data.model;
       resultTime.textContent = new Date(data.processed_at).toLocaleString();
-      resultPlaceholder.classList.add('d-none');
-      resultBody.classList.remove('d-none');
-      processStatus.textContent = 'Processing complete.';
-      loadGallery();
+      resultCard.classList.remove('d-none');
+      resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      processStatus.textContent = 'Done';
     } catch (err) {
-      processStatus.textContent = 'Processing failed: ' + err.message;
+      processStatus.textContent = 'Failed: ' + err.message;
     } finally {
       btnProcess.disabled = false;
     }
   });
 
-  async function loadGallery() {
-    try {
-      const data = await fetchJSON('api/v1/images');
-      const images = data.images || [];
-      gallery.innerHTML = '';
-      galleryEmpty.classList.toggle('d-none', images.length > 0);
-      images.forEach((img) => {
-        const col = document.createElement('div');
-        col.className = 'col-sm-6 col-md-4 col-xl-3';
-        const href = 'api/v1/images/' + encodeURIComponent(img.filename);
-        const thumb = img.description
-          ? `<p class="small mb-0 gallery-desc">${escapeHtml(img.description)}</p>`
-          : '';
-        col.innerHTML =
-          `<div class="card h-100 gallery-card">
-             <a href="${href}" target="_blank" rel="noopener" class="gallery-thumb">
-               <img src="${href}" alt="${escapeHtml(img.filename)}" loading="lazy" class="card-img-top" />
-             </a>
-             <div class="card-body">
-               <div class="small text-secondary mb-1 font-monospace text-truncate">${escapeHtml(img.filename)}</div>
-               ${thumb}
-             </div>
-           </div>`;
-        gallery.appendChild(col);
-      });
-    } catch (err) {
-      galleryEmpty.classList.remove('d-none');
-      galleryEmpty.textContent = 'Could not load stored images.';
-    }
-  }
-
-  btnRefresh.addEventListener('click', loadGallery);
-
-  loadUser();
-  loadGallery();
+  checkConnection();
 });

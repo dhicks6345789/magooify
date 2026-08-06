@@ -35,7 +35,7 @@ Optional flags:
 | --- | --- | --- |
 | `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the image endpoint reports that OpenRouter is not configured. |
 | `-output-dir` | `processed` | Folder where processed images and their text descriptions are stored. |
-| `-model` | `openai/gpt-4o-mini` | OpenRouter model used to process the images (any vision-capable model). |
+| `-model` | `google/gemini-3.1-flash-lite-image` | OpenRouter model used to process the images (any vision-capable model). |
 | `-port` | `8080` | Port for the local server. |
 | `-mode` | `desktop` | `desktop` or `server`. |
 | `-host` | (derived) | Host IP to bind to (`127.0.0.1` in desktop mode, `0.0.0.0` in server mode). |

@@ -23,7 +23,7 @@ import (
 
 const (
 	openRouterDefaultURL = "https://openrouter.ai/api/v1/chat/completions"
-	defaultModel         = "openai/gpt-4o-mini"
+	defaultModel         = "google/gemini-3.1-flash-lite-image"
 	defaultOutputDir     = "processed"
 	imageProcessPrompt   = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
 	maxImageUploadBytes  = 25 << 20
@@ -91,7 +91,7 @@ type ProcessImageResponse struct {
 	Filename    string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
 	TextFile    string    `json:"text_file" example:"img-20260806-123000-a1b2c3d4.txt"`
 	Description string    `json:"description" example:"A sunny garden with a wooden bench."`
-	Model       string    `json:"model" example:"openai/gpt-4o-mini"`
+	Model       string    `json:"model" example:"google/gemini-3.1-flash-lite-image"`
 	ProcessedAt time.Time `json:"processed_at"`
 }
 
