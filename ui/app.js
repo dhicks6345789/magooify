@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultCard = document.getElementById('result-card');
   const resultImage = document.getElementById('result-image');
   const resultFilename = document.getElementById('result-filename');
+  const resultDownload = document.getElementById('result-download');
   const resultModel = document.getElementById('result-model');
   const resultTime = document.getElementById('result-time');
   const btnReset = document.getElementById('btn-reset');
@@ -462,6 +463,8 @@ document.addEventListener('DOMContentLoaded', () => {
         '?t=' +
         encodeURIComponent(data.processed_at);
       resultFilename.textContent = data.filename;
+      resultDownload.href = 'api/v1/images/' + encodeURIComponent(data.filename);
+      resultDownload.setAttribute('download', data.filename);
       resultModel.textContent = data.model;
       resultTime.textContent = new Date(data.processed_at).toLocaleString();
       resultCard.classList.remove('d-none');
