@@ -25,9 +25,20 @@ const (
 	openRouterDefaultURL = "https://openrouter.ai/api/v1/chat/completions"
 	defaultModel         = "google/gemini-3.1-flash-lite-image"
 	defaultOutputDir     = "processed"
-	imageProcessPrompt   = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
+	fallbackPrompt       = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
 	maxImageUploadBytes  = 25 << 20
 )
+
+// processPrompt returns the image-processing instructions sent to the model.
+// The text is taken from the embedded PROMPT.md file (see PROMPT.md at the
+// repository root), falling back to a built-in prompt if the file is missing
+// or empty.
+func processPrompt() string {
+	if p := strings.TrimSpace(promptMD); p != "" {
+		return p
+	}
+	return fallbackPrompt
+}
 
 // errOpenRouterNotConfigured is returned when the OpenRouter API key has not
 // been supplied via the -openrouter-key command-line option.
@@ -412,7 +423,7 @@ func (a *api) processWithOpenRouter(img []byte, contentType, filename string) (s
 			map[string]any{
 				"role": "user",
 				"content": []any{
-					map[string]any{"type": "text", "text": imageProcessPrompt},
+					map[string]any{"type": "text", "text": processPrompt()},
 					map[string]any{"type": "image_url", "image_url": map[string]any{"url": dataURL}},
 				},
 			},

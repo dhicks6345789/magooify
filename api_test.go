@@ -536,6 +536,16 @@ func TestParseBasePaths(t *testing.T) {
 	}
 }
 
+func TestProcessPromptFromFile(t *testing.T) {
+	got := processPrompt()
+	if got == "" {
+		t.Fatal("processPrompt() returned an empty prompt")
+	}
+	if !strings.Contains(got, "Clean this scanned image") {
+		t.Errorf("processPrompt() does not contain the PROMPT.md text: %q", got)
+	}
+}
+
 func TestProcessImageNoKey(t *testing.T) {
 	a := newAPI(false, docsFS)
 	a.outputDir = t.TempDir()
@@ -603,6 +613,12 @@ func TestImageProcessingRoutes(t *testing.T) {
 		}
 		if body["model"] != defaultModel {
 			t.Errorf("model = %v, want %q", body["model"], defaultModel)
+		}
+		messages := body["messages"].([]any)
+		content := messages[0].(map[string]any)["content"].([]any)
+		text := content[0].(map[string]any)["text"].(string)
+		if text != strings.TrimSpace(promptMD) {
+			t.Errorf("prompt text = %q, want PROMPT.md text %q", text, strings.TrimSpace(promptMD))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"choices":[{"message":{"content":"A tiny test image"}}]}`))

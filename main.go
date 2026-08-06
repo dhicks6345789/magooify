@@ -23,6 +23,9 @@ var uiFS embed.FS
 //go:embed all:docs
 var docsFS embed.FS
 
+//go:embed PROMPT.md
+var promptMD string
+
 // registerMimeTypes pins deterministic Content-Type headers for embedded
 // assets so the UI and docs work even on hosts without a system MIME database.
 func registerMimeTypes() {
