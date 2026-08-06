@@ -1,6 +1,6 @@
-# Go App
+# Magooify
 
-A project to act as an example framework to produce a self-hostable Go application that contains application logic, an embedded Bootstrap web user interface and interactive OpenAPI documentation into a single executable.
+Magooify is a self-hostable Go application that bundles application logic, an embedded Bootstrap web user interface and interactive OpenAPI documentation into a single executable.
 
 This application itself doesn't do anything much, it just presents a basic user interface showing the current user name. 
 
@@ -20,46 +20,46 @@ This application itself doesn't do anything much, it just presents a basic user 
 
 ### Desktop
 
-Simply download and run the executable for your platform from the [project homepage](https://sansay.co.uk/go-app/).
+Simply download and run the executable for your platform from the [project homepage](https://sansay.co.uk/magooify/).
 
 ### Server
 
-You can run Go App behind an authenticating proxy server - the proxy server handles HTTPS, authenticates the user and passes the username to the application via an HTTP header. As the executable is compiled with CGO disabled (CGO_ENABLED=0) and the proxy server is dealing with HTTPS, the container environment can use the `scratch` (completely empty) container image. For instance, if you were using Pangolin as your authenticating server, you would add a basic Dockerfile:
+You can run Magooify behind an authenticating proxy server - the proxy server handles HTTPS, authenticates the user and passes the username to the application via an HTTP header. As the executable is compiled with CGO disabled (CGO_ENABLED=0) and the proxy server is dealing with HTTPS, the container environment can use the `scratch` (completely empty) container image. For instance, if you were using Pangolin as your authenticating server, you would add a basic Dockerfile:
 
 ```
 # Note: the "scratch" image is 0 bytes, it doesn't have tools like chmod, so there's some extra steps
 # needed to get executable files inside a "scratch" image. We need to build a "downloader" image...
 FROM alpine:latest AS downloader
 RUN apk add --no-cache curl && \
-    curl -L https://www.sansay.co.uk/go-app/go-app-linux-amd64 -o /go-app && \
-    chmod +x /go-app
+    curl -L https://www.sansay.co.uk/magooify/magooify-linux-amd64 -o /magooify && \
+    chmod +x /magooify
 
 # ...then use that to build the actual image we want.
 FROM scratch
-COPY --from=downloader /go-app /go-app
+COPY --from=downloader /magooify /magooify
 ```
 And to docker compose, add something like:
 ```
-goapp:
-    image: GO_APP_IMAGE
-    command: /go-app -mode=server -port=8080 -base-path=/go-app
-    container_name: goapp
+magooify:
+    image: MAGOOIFY_IMAGE
+    command: /magooify -mode=server -port=8080 -base-path=/magooify
+    container_name: magooify
     restart: unless-stopped
 ```
-From the Pangolin control panel you would then create a resource, possibly with a prefix ("go-app" or whatever you have named your derived app) using whatever authentication and access controls you like, that pointed at that container (`goapp:8080`). If you do use a prefix for the resource, be sure to add that prefix as the "-base-path" option when running the server.
+From the Pangolin control panel you would then create a resource, possibly with a prefix ("magooify" or whatever you have named your derived app) using whatever authentication and access controls you like, that pointed at that container (`magooify:8080`). If you do use a prefix for the resource, be sure to add that prefix as the "-base-path" option when running the server.
 
 ## Building
 
 Clone the repository:
 
 ```
-git clone https://github.com/dhicks6345789/go-app.git
+git clone https://github.com/dhicks6345789/magooify.git
 ```
 
 And run build:
 
 ```
-cd go-app
+cd magooify
 bash build.sh build-all
 ```
 
@@ -68,7 +68,7 @@ This will compile the executables for all platforms.
 You can build executables and generate documentation, including Swaggo's interactive API documentation, and copy the lot directly to somewhere they can be served as a web site to act as a project homepage using "build.sh dist". You just need to specify the path you want the files to go to, e.g.:
 
 ```
-bash build.sh dist ~/www/go-app
+bash build.sh dist ~/www/magooify
 ```
 
 ## Using As a Basis For Your Own Projects

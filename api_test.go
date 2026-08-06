@@ -236,7 +236,7 @@ func TestServeAllRoutes(t *testing.T) {
 		wantContent string
 		wantBody    string
 	}{
-		{"/", http.StatusOK, "text/html", "Go Self-Contained App"},
+		{"/", http.StatusOK, "text/html", "Magooify"},
 		{"/style.css", http.StatusOK, "text/css", ".brand-icon"},
 		{"/vendor/bootstrap/bootstrap.min.css", http.StatusOK, "text/css", "bootstrap"},
 		{"/app.js", http.StatusOK, "text/javascript", "DOMContentLoaded"},
@@ -328,7 +328,7 @@ func TestIndexRedirectAddsTrailingSlash(t *testing.T) {
 		if loc := rr.Header().Get("Location"); loc != "" {
 			t.Errorf("%s: unexpected Location %q", tc.path, loc)
 		}
-		if tc.wantHTML && !strings.Contains(rr.Body.String(), "Go Self-Contained App") {
+		if tc.wantHTML && !strings.Contains(rr.Body.String(), "Magooify") {
 			t.Errorf("%s: expected index.html body", tc.path)
 		}
 		if tc.wantCT != "" {
@@ -430,7 +430,7 @@ func TestServeUnderBasePath(t *testing.T) {
 		wantBody    string
 	}{
 		// Under the base path.
-		{"/magooify/", http.StatusOK, "text/html", "Go Self-Contained App"},
+		{"/magooify/", http.StatusOK, "text/html", "Magooify"},
 		{"/magooify/style.css", http.StatusOK, "text/css", ".brand-icon"},
 		{"/magooify/vendor/bootstrap/bootstrap.min.css", http.StatusOK, "text/css", "bootstrap"},
 		{"/magooify/app.js", http.StatusOK, "text/javascript", "DOMContentLoaded"},
@@ -440,7 +440,7 @@ func TestServeUnderBasePath(t *testing.T) {
 		{"/magooify/docs/swagger.json", http.StatusOK, "application/json", `"swagger"`},
 		{"/magooify/docs/swagger-ui/swagger-ui.css", http.StatusOK, "text/css", "swagger-ui"},
 		// The site root keeps working alongside the base path.
-		{"/", http.StatusOK, "text/html", "Go Self-Contained App"},
+		{"/", http.StatusOK, "text/html", "Magooify"},
 		{"/style.css", http.StatusOK, "text/css", ".brand-icon"},
 		{"/app.js", http.StatusOK, "text/javascript", "DOMContentLoaded"},
 		{"/api/v1/health", http.StatusOK, "application/json", `"ok"`},

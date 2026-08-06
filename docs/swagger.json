@@ -1,8 +1,8 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "API documentation for the self-contained Go application framework.",
-        "title": "Go Self-Contained App API",
+        "description": "API documentation for Magooify, a self-contained Go application framework.",
+        "title": "Magooify API",
         "contact": {},
         "version": "1.0.0"
     },

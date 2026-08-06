@@ -78,8 +78,8 @@ type api struct {
 	docsFileServer http.Handler
 }
 
-// @title Go Self-Contained App API
-// @description API documentation for the self-contained Go application framework.
+// @title Magooify API
+// @description API documentation for Magooify, a self-contained Go application framework.
 // @version 1.0.0
 func newAPI(isServerMode bool, docsFS fs.FS) *api {
 	a := &api{
@@ -88,7 +88,7 @@ func newAPI(isServerMode bool, docsFS fs.FS) *api {
 		items: []Item{
 			{
 				ID:        1,
-				Name:      "Welcome to Go Self-Contained App",
+				Name:      "Welcome to Magooify",
 				CreatedBy: "system",
 				CreatedAt: time.Now(),
 			},
@@ -273,7 +273,7 @@ func swaggerUIHTML() []byte {
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Go App - API Documentation</title>
+<title>Magooify - API Documentation</title>
 <link rel="stylesheet" href="swagger-ui/swagger-ui.css"/>
 <style>
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -285,7 +285,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Ro
 </head>
 <body>
 <div class="topbar">
-  <h1>Go App - API Documentation</h1>
+  <h1>Magooify - API Documentation</h1>
   <a href="../">Back to Home</a>
 </div>
 <div id="swagger-ui"></div>

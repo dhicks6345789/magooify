@@ -95,7 +95,7 @@ func main() {
 	user := a.getUser(&http.Request{})
 
 	log.Printf("==================================================")
-	log.Printf("Go Self-Contained App Starting")
+	log.Printf("Magooify Starting")
 	log.Printf("Mode      : %s", strings.ToUpper(user.Mode))
 	log.Printf("User      : %s (%s)", user.Username, user.AuthType)
 	log.Printf("Listening : http://%s", addr)

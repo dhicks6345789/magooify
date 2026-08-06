@@ -1,6 +1,6 @@
 # Go binary & temp files
-go-app
-go-app.exe
+magooify
+magooify.exe
 dist/
 *.log
 
