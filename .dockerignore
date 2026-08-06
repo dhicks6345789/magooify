@@ -1,0 +1,10 @@
+go-app
+go-app.exe
+dist
+index.html
+.git
+.gitignore
+Dockerfile
+build.sh
+Makefile
+hugo

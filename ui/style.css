@@ -1,0 +1,56 @@
+body {
+  min-height: 100vh;
+  padding-bottom: 4rem;
+}
+
+.brand-icon {
+  display: inline-block;
+  width: 2rem;
+  height: 2rem;
+  line-height: 2rem;
+  text-align: center;
+  border-radius: 0.5rem;
+  background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+  margin-right: 0.5rem;
+}
+
+.user-badge {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.hero-card {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.1) 100%);
+}
+
+.status-value {
+  color: var(--bs-info);
+}
+
+.items-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.code-block {
+  background: #090d16;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+  font-size: 0.85rem;
+  color: #a7f3d0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.footer {
+  margin-top: 3rem;
+  text-align: center;
+  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+  border-top: 1px solid var(--bs-border-color);
+  padding-top: 1.5rem;
+}

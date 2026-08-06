@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Go Application Release Distribution</title>
+  <style>
+    :root {
+      --bg-color: #f8fafc;
+      --card-bg: #ffffff;
+      --border-color: #e2e8f0;
+      --text-primary: #0f172a;
+      --text-secondary: #64748b;
+      --accent-color: #2563eb;
+      --accent-hover: #1d4ed8;
+      --code-bg: #f1f5f9;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-primary);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 1000px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border-color); }
+    header h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.5rem;
+    }
+    header p { color: var(--text-secondary); font-size: 1.1rem; }
+    .section-title { font-size: 1.8rem; margin: 2.5rem 0 1.5rem 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem; }
+    .downloads-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 3rem;
+    }
+    .download-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .download-card:hover { transform: translateY(-2px); border-color: var(--accent-color); }
+    .card-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .card-info h3 { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .card-info p { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.75rem; }
+    .file-meta { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem; }
+    .btn-download {
+      display: inline-block;
+      text-align: center;
+      background: var(--accent-color);
+      color: #ffffff;
+      font-weight: 600;
+      padding: 0.6rem 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: background 0.2s ease;
+    }
+    .btn-download:hover { background: var(--accent-hover); color: #ffffff; }
+    .docs-section { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 2.5rem; margin-top: 2rem; }
+    .docs-section h1 { font-size: 2rem; margin-bottom: 1rem; color: var(--accent-color); }
+    .docs-section h2 { font-size: 1.5rem; margin: 1.5rem 0 1rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; }
+    .docs-section h3 { font-size: 1.2rem; margin: 1.2rem 0 0.5rem 0; }
+    .docs-section p { margin-bottom: 1rem; color: var(--text-primary); }
+    .docs-section ul { margin-left: 1.5rem; margin-bottom: 1rem; color: var(--text-primary); }
+    .docs-section li { margin-bottom: 0.4rem; }
+    pre { background: var(--code-bg); padding: 1rem; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border-color); margin-bottom: 1.2rem; }
+    code { font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 0.9rem; color: #334155; }
+    p code, li code { background: var(--code-bg); padding: 0.2rem 0.4rem; border-radius: 4px; color: var(--accent-color); }
+    .table-container { overflow-x: auto; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--border-color); }
+    th { background: var(--code-bg); color: var(--accent-color); font-weight: 600; }
+    a { color: var(--accent-color); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .github-link {
+      display: inline-block;
+      margin-top: 0.5rem;
+      padding: 0.4rem 1rem;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: border-color 0.2s ease;
+    }
+    .github-link:hover { border-color: var(--accent-color); text-decoration: none; }
+    hr { border: none; border-top: 1px solid var(--border-color); margin: 2rem 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>⚡ Go Application Release Distribution</h1>
+      <p>Self-contained, cross-platform executable builds with embedded Bootstrap UI and OpenAPI docs.</p>
+      <p><a href="https://github.com/dhicks6345789/go-app" target="_blank" class="github-link">View on GitHub</a> &middot; <a href="docs/api.html" target="_blank" class="github-link">API Documentation</a></p>
+    </header>
+
+    <h2 class="section-title">📦 Download Executables</h2>
+    <div class="downloads-grid">
+      {{ range site.Data.downloads.downloads }}
+      <div class="download-card">
+        <div class="card-icon">{{ .icon }}</div>
+        <div class="card-info">
+          <h3>{{ .name }}</h3>
+          <p>{{ .desc }}</p>
+          <div class="file-meta">File: <code>{{ .filename }}</code> &middot; {{ .size }}</div>
+        </div>
+        <a href="{{ .filename }}" class="btn-download" download>Download</a>
+      </div>
+      {{ end }}
+    </div>
+
+    <h2 class="section-title">📖 Project Documentation</h2>
+    <div class="docs-section">
+      {{ .Content }}
+    </div>
+  </div>
+</body>
+</html>

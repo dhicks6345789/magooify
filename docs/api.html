@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Go App - API Documentation</title>
+<link rel="stylesheet" href="swagger-ui/swagger-ui.css"/>
+<style>
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+.topbar { background: #1e293b; border-bottom: 1px solid #334155; padding: 0.75rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.topbar h1 { font-size: 1.1rem; font-weight: 600; color: #38bdf8; margin: 0; }
+.topbar a { color: #94a3b8; font-size: 0.9rem; text-decoration: none; margin-left: auto; }
+.topbar a:hover { color: #38bdf8; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>Go App - API Documentation</h1>
+  <a href="../">Back to Home</a>
+</div>
+<div id="swagger-ui"></div>
+<script src="swagger-ui/swagger-ui-bundle.js"></script>
+<script src="swagger-ui/swagger-ui-standalone-preset.js"></script>
+<script>
+window.onload = function () {
+  window.ui = SwaggerUIBundle({
+    url: "swagger.json",
+    dom_id: "#swagger-ui",
+    deepLinking: true,
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+    layout: "StandaloneLayout",
+    docExpansion: "list",
+    displayRequestDuration: true,
+    filter: true,
+  });
+};
+</script>
+</body>
+</html>
