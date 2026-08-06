@@ -17,7 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const modelsModal = document.getElementById('modelsModal');
   const modelsSearch = document.getElementById('models-search');
-  const modelsImageOutput = document.getElementById('models-image-output');
   const modelsTbody = document.getElementById('models-tbody');
   const modelsCount = document.getElementById('models-count');
   let modelsList = null;
@@ -135,13 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderModels() {
     if (!modelsList) return;
     const q = modelsSearch.value.trim().toLowerCase();
-    const onlyImageOutput = modelsImageOutput.checked;
     const rows = modelsList.filter((m) => {
-      if (onlyImageOutput && !m.outputs_images) return false;
       if (!q) return true;
       return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
     });
-    modelsCount.textContent = rows.length + ' of ' + modelsList.length + ' models';
+    modelsCount.textContent = rows.length + ' models';
     modelsTbody.innerHTML = '';
     for (const m of rows) {
       const tr = document.createElement('tr');
@@ -155,28 +152,22 @@ document.addEventListener('DOMContentLoaded', () => {
         '</td>' +
         '<td class="text-end">' + currencyFmt.format(m.estimated_image_cost || 0) + '</td>' +
         '<td class="text-end">' + perMillionFmt.format(m.prompt_per_million || 0) + '</td>' +
-        '<td class="text-end">' + perMillionFmt.format(m.completion_per_million || 0) + '</td>' +
-        '<td class="text-center">' +
-        (m.outputs_images
-          ? '<span class="text-success">&#10003;</span>'
-          : '<span class="text-secondary">&ndash;</span>') +
-        '</td>';
+        '<td class="text-end">' + perMillionFmt.format(m.completion_per_million || 0) + '</td>';
       modelsTbody.appendChild(tr);
     }
   }
 
   modelsModal.addEventListener('shown.bs.modal', () => {
     modelsTbody.innerHTML =
-      '<tr><td colspan="5" class="text-center text-secondary py-4">Loading models...</td></tr>';
+      '<tr><td colspan="4" class="text-center text-secondary py-4">Loading models...</td></tr>';
     modelsCount.textContent = '';
     loadModels().catch((err) => {
       modelsTbody.innerHTML =
-        '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load models: ' +
+        '<tr><td colspan="4" class="text-center text-danger py-4">Failed to load models: ' +
         escapeHTML(err.message) + '</td></tr>';
     });
   });
   modelsSearch.addEventListener('input', renderModels);
-  modelsImageOutput.addEventListener('change', renderModels);
 
   function setProcessing(on) {
     btnProcess.disabled = on || !currentBlob;

@@ -138,18 +138,17 @@ type CreditsResponse struct {
 	SessionCost      float64 `json:"session_cost"`
 }
 
-// ModelInfo describes an OpenRouter model that accepts image input and the cost
-// of processing a single image with it. OpenRouter publishes exact per-image
-// prices for some models (via pricing.image for image input and
-// pricing.image_output for a generated image); where no such price exists the
-// cost is estimated from the per-token rates. InputImageCostKnown and
-// OutputImageCostKnown report which of the two costs is an exact published
-// price rather than an estimate. EstimatedImageCost is the sum used for a
-// single image-in/image-out processing run.
+// ModelInfo describes an OpenRouter model that can process an image and return
+// a processed image, together with the cost of a single processing run.
+// OpenRouter publishes exact per-image prices for some models (via
+// pricing.image for image input and pricing.image_output for a generated
+// image); where no such price exists the cost is estimated from the per-token
+// rates. InputImageCostKnown and OutputImageCostKnown report which of the two
+// costs is an exact published price rather than an estimate.
+// EstimatedImageCost is the sum used for a single image-in/image-out run.
 type ModelInfo struct {
 	ID                   string  `json:"id" example:"google/gemini-3.1-flash-lite-image"`
 	Name                 string  `json:"name" example:"Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"`
-	OutputsImages        bool    `json:"outputs_images" example:"true"`
 	InputImageCost       float64 `json:"input_image_cost" example:"0.0004"`
 	InputImageCostKnown  bool    `json:"input_image_cost_known" example:"false"`
 	OutputImageCost      float64 `json:"output_image_cost" example:"0.03"`
@@ -431,11 +430,11 @@ type openRouterModel struct {
 	Pricing openRouterPricing `json:"pricing"`
 }
 
-// models returns the OpenRouter models that accept image input, together with
-// the estimated cost of processing a single image with each one, cheapest
-// first.
-// @Summary List Image-Capable Models
-// @Description Lists OpenRouter models that accept image input with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.
+// models returns the OpenRouter models that can process an image and return a
+// processed image, together with the estimated cost of processing a single
+// image with each one, cheapest first.
+// @Summary List Image Processing Models
+// @Description Lists OpenRouter models that can process an image and return a processed image, with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.
 // @Produce json
 // @Success 200 {object} ModelsResponse
 // @Failure 502 {object} ErrorResponse
@@ -450,10 +449,11 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ModelsResponse{Models: models})
 }
 
-// fetchModels returns the list of OpenRouter models that accept image input,
-// cheapest first. The result is cached briefly so the UI can reload without
-// hammering OpenRouter; the request is public and does not require a key, but
-// the configured key is sent when present so rate limits apply to the account.
+// fetchModels returns the list of OpenRouter models that accept image input
+// and return a processed image, cheapest first. The result is cached briefly so
+// the UI can reload without hammering OpenRouter; the request is public and
+// does not require a key, but the configured key is sent when present so rate
+// limits apply to the account.
 func (a *api) fetchModels() ([]ModelInfo, error) {
 	a.mu.RLock()
 	if a.modelsCache != nil && time.Since(a.modelsCachedAt) < modelsCacheTTL {
@@ -504,17 +504,17 @@ func (a *api) fetchModels() ([]ModelInfo, error) {
 }
 
 // buildModelList converts OpenRouter's raw model objects into the ModelInfo
-// view, keeping only models that accept image input and computing a per-image
-// cost for each. Exact published prices take precedence; otherwise the cost is
-// estimated from the per-token rates using imageInputTokenEstimate and
-// imageOutputTokenEstimate.
+// view, keeping only models that accept image input and return a processed
+// image, and computing a per-image cost for each. Exact published prices take
+// precedence; otherwise the cost is estimated from the per-token rates using
+// imageInputTokenEstimate and imageOutputTokenEstimate.
 func buildModelList(rows []openRouterModel) []ModelInfo {
 	models := make([]ModelInfo, 0, len(rows))
 	for _, m := range rows {
-		if !containsString(m.Architecture.Input, "image") {
+		if !containsString(m.Architecture.Input, "image") ||
+			!containsString(m.Architecture.Output, "image") {
 			continue
 		}
-		outputsImages := containsString(m.Architecture.Output, "image")
 
 		prompt := parsePrice(m.Pricing.Prompt)
 		completion := parsePrice(m.Pricing.Completion)
@@ -523,7 +523,6 @@ func buildModelList(rows []openRouterModel) []ModelInfo {
 		mi := ModelInfo{
 			ID:                   m.ID,
 			Name:                 m.Name,
-			OutputsImages:        outputsImages,
 			PromptPerMillion:     prompt * 1e6,
 			CompletionPerMillion: completion * 1e6,
 			RequestCost:          request,
@@ -536,13 +535,11 @@ func buildModelList(rows []openRouterModel) []ModelInfo {
 			mi.InputImageCost = prompt * imageInputTokenEstimate
 		}
 
-		if outputsImages {
-			if img := parsePrice(m.Pricing.ImageOutput); img > 0 {
-				mi.OutputImageCost = img
-				mi.OutputImageCostKnown = true
-			} else {
-				mi.OutputImageCost = completion * imageOutputTokenEstimate
-			}
+		if img := parsePrice(m.Pricing.ImageOutput); img > 0 {
+			mi.OutputImageCost = img
+			mi.OutputImageCostKnown = true
+		} else {
+			mi.OutputImageCost = completion * imageOutputTokenEstimate
 		}
 
 		mi.EstimatedImageCost = roundCost(mi.InputImageCost + mi.OutputImageCost + mi.RequestCost)

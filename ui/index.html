@@ -113,21 +113,11 @@
       <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Image-Capable Models</h5>
+            <h5 class="modal-title">Image Processing Models</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
           </div>
           <div class="modal-body">
-            <div class="row g-2 mb-2 align-items-center">
-              <div class="col-sm-7">
-                <input type="search" id="models-search" class="form-control" placeholder="Search models..." autocomplete="off" />
-              </div>
-              <div class="col-sm-5">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="models-image-output" checked />
-                  <label class="form-check-label" for="models-image-output">Only models that return an image</label>
-                </div>
-              </div>
-            </div>
+            <input type="search" id="models-search" class="form-control mb-2" placeholder="Search models..." autocomplete="off" />
             <div class="small text-secondary mb-2" id="models-count"></div>
             <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
               <table class="table table-sm table-hover align-middle mb-0">
@@ -137,7 +127,6 @@
                     <th class="text-end">Cost / image</th>
                     <th class="text-end">Input /1M</th>
                     <th class="text-end">Output /1M</th>
-                    <th class="text-center">Returns image</th>
                   </tr>
                 </thead>
                 <tbody id="models-tbody"></tbody>

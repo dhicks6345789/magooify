@@ -167,11 +167,11 @@
         },
         "/api/v1/models": {
             "get": {
-                "description": "Lists OpenRouter models that accept image input with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.",
+                "description": "Lists OpenRouter models that can process an image and return a processed image, with the estimated cost of processing a single image, so cheaper alternatives to the configured model are easy to spot. Exact per-image prices are used when published; otherwise costs are estimated from the per-token rates.",
                 "produces": [
                     "application/json"
                 ],
-                "summary": "List Image-Capable Models",
+                "summary": "List Image Processing Models",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -411,10 +411,6 @@
                     "example": 0.03
                 },
                 "output_image_cost_known": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "outputs_images": {
                     "type": "boolean",
                     "example": true
                 },

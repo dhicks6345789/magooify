@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -1276,15 +1277,15 @@ func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 	}
 
 	models := buildModelList(rows)
-	if len(models) != 3 {
-		t.Fatalf("buildModelList kept %d models, want 3 (text-only excluded)", len(models))
+	if len(models) != 2 {
+		t.Fatalf("buildModelList kept %d models, want 2 (text-only and text-output excluded)", len(models))
 	}
 
 	exact := models[0]
 	if exact.ID != "google/exact-img-model" {
 		t.Fatalf("models[0] = %q, want the exact-priced model", exact.ID)
 	}
-	if !exact.OutputsImages || !exact.InputImageCostKnown || !exact.OutputImageCostKnown {
+	if !exact.InputImageCostKnown || !exact.OutputImageCostKnown {
 		t.Errorf("exact model flags = %+v, want all true", exact)
 	}
 	if exact.InputImageCost != 0.0004 || exact.OutputImageCost != 0.03 {
@@ -1297,31 +1298,17 @@ func TestBuildModelListFiltersAndEstimates(t *testing.T) {
 		t.Errorf("estimated cost = %v, want 0.0304", exact.EstimatedImageCost)
 	}
 
-	vision := models[1]
-	if vision.OutputsImages {
-		t.Errorf("vision text model marked as image output")
+	token := models[1]
+	if token.ID != "meta/image-token-model" {
+		t.Fatalf("models[1] = %q, want the per-token-priced model", token.ID)
 	}
-	if vision.InputImageCostKnown || vision.OutputImageCostKnown {
-		t.Errorf("vision text model should have no exact per-image prices")
+	if token.InputImageCostKnown || token.OutputImageCostKnown {
+		t.Errorf("token model should not have exact per-image prices")
 	}
-	if want := 0.0000025 * imageInputTokenEstimate; vision.InputImageCost != want {
-		t.Errorf("estimated input cost = %v, want %v", vision.InputImageCost, want)
+	if want := 0.0000001 * imageInputTokenEstimate; math.Abs(token.InputImageCost-want) > 1e-12 {
+		t.Errorf("estimated input cost = %v, want %v", token.InputImageCost, want)
 	}
-	if vision.OutputImageCost != 0 {
-		t.Errorf("text-output model should have no output image cost, got %v", vision.OutputImageCost)
-	}
-	if want := roundCost(vision.InputImageCost); vision.EstimatedImageCost != want {
-		t.Errorf("estimated cost = %v, want %v", vision.EstimatedImageCost, want)
-	}
-
-	token := models[2]
-	if !token.OutputsImages {
-		t.Errorf("image token model should output images")
-	}
-	if token.OutputImageCostKnown {
-		t.Errorf("image token model should not have an exact output price")
-	}
-	if want := 0.0000004 * imageOutputTokenEstimate; token.OutputImageCost != want {
+	if want := 0.0000004 * imageOutputTokenEstimate; math.Abs(token.OutputImageCost-want) > 1e-12 {
 		t.Errorf("estimated output cost = %v, want %v", token.OutputImageCost, want)
 	}
 	if token.EstimatedImageCost != roundCost(token.InputImageCost+token.OutputImageCost) {
@@ -1335,7 +1322,7 @@ func TestModelsEndpointAndCache(t *testing.T) {
 		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
 		 "pricing":{"prompt":"0.00000025","completion":"0.0000015","image_output":"0.03"}},
 		{"id":"openai/gpt-4o","name":"GPT-4o",
-		 "architecture":{"input_modalities":["image","text"],"output_modalities":["text"]},
+		 "architecture":{"input_modalities":["image","text"],"output_modalities":["image","text"]},
 		 "pricing":{"prompt":"0.0000025","completion":"0.00001"}},
 		{"id":"anthropic/claude-text","name":"Text Only",
 		 "architecture":{"input_modalities":["text"],"output_modalities":["text"]},
@@ -1366,8 +1353,8 @@ func TestModelsEndpointAndCache(t *testing.T) {
 	if len(resp.Models) != 2 {
 		t.Fatalf("got %d models, want 2 (text-only filtered out)", len(resp.Models))
 	}
-	// The cheaper model (0.004, image-input only) sorts before the image-output
-	// model (0.0304, which pays for a generated image).
+	// The cheaper model (0.0169, per-token estimate) sorts before the exact-priced
+	// image-output model (0.0304, which pays for a generated image).
 	if resp.Models[0].ID != "openai/gpt-4o" {
 		t.Errorf("models[0] = %q, want the cheaper model first", resp.Models[0].ID)
 	}
