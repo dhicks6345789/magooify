@@ -121,8 +121,9 @@ type ProcessImageRequest struct {
 	Prompt   string `json:"prompt" example:"Clean this scanned image"`
 	Output   string `json:"output" example:"img-20260806-123000-a1b2c3d4.jpg"`
 	// Vectorise traces the processed image into a resolution-independent SVG
-	// document, keeping the bitmap artwork (filled black) on a transparent
-	// background. Models that already return SVG are passed through unchanged.
+	// document with one colour layer per colour in the artwork, on a
+	// transparent background. Models that already return SVG are passed
+	// through unchanged.
 	Vectorise bool `json:"vectorise" example:"false"`
 }
 

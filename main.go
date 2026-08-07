@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -406,10 +407,11 @@ func openBrowser(url string) error {
 // between corners, and finally write the SVG path data.
 // ---------------------------------------------------------------------------
 
-// vectoriseThreshold is the luminance below which a pixel is treated as ink
-// and traced into a vector path. 0.5 suits the clean black-on-white output
-// produced by the processing prompt.
-const vectoriseThreshold = 0.5
+// vectoriseMaxColourLayers is the largest number of distinct colour layers the
+// trace produces. The most populous colours in the bitmap are kept as their own
+// layers and any remaining colours are merged into the nearest kept layer, so
+// anti-aliasing and tiny colour variations don't explode the layer count.
+const vectoriseMaxColourLayers = 16
 
 // vectoriseMaxFitError is the largest distance (in pixels) a fitted bezier
 // curve may stray from the traced boundary before the fit is abandoned in
@@ -428,12 +430,12 @@ func isSVGDocument(img []byte) bool {
 		(bytes.HasPrefix(trimmed, []byte("<?xml")) && bytes.Contains(trimmed, []byte("<svg")))
 }
 
-// vectoriseBitmap converts a processed bitmap into an SVG document tracing the
-// ink pixels into smooth vector paths. Bitmap formats supported by the
-// standard library (PNG, JPEG, GIF) are accepted; an image that is already
-// vector (an SVG document) is passed through unchanged. The returned document
-// has a transparent background with the traced ink filled black, sized to the
-// source image.
+// vectoriseBitmap converts a processed bitmap into an SVG document, tracing the
+// artwork into one vector layer per colour so the vector result matches the
+// bitmap version. Bitmap formats supported by the standard library (PNG, JPEG,
+// GIF) are accepted; an image that is already vector (an SVG document) is
+// passed through unchanged. The returned document has a transparent background
+// with the colour layers on top, sized to the source image.
 func vectoriseBitmap(imgBytes []byte) ([]byte, error) {
 	if isSVGDocument(imgBytes) {
 		return imgBytes, nil
@@ -446,26 +448,139 @@ func vectoriseBitmap(imgBytes []byte) ([]byte, error) {
 
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	mask := make([]bool, w*h)
+	return colourLoopsToSVG(colourLayers(img), w, h), nil
+}
+
+// vectorPixel is a single pixel's colour, used while building colour layers.
+type vectorPixel struct {
+	r, g, b, a uint8
+}
+
+// colourLayer is one traced colour: the fill colour and the binary mask of
+// pixels belonging to it. count is the number of pixels in the mask.
+type colourLayer struct {
+	r, g, b uint8
+	mask    []bool
+	count   int
+}
+
+// colourBucket accumulates the pixels of one quantised colour so the average
+// fill colour and total population of the layer can be computed.
+type colourBucket struct {
+	count            int
+	sumR, sumG, sumB uint64
+}
+
+// quantColourKey folds a pixel's colour into a coarse 12-bit bucket key (4 bits
+// per channel). Neighbouring colours share a bucket, so photos and soft edges
+// produce a manageable number of candidate layers instead of one per colour.
+func quantColourKey(p vectorPixel) int {
+	return int(p.r>>4)<<8 | int(p.g>>4)<<4 | int(p.b>>4)
+}
+
+// colourLayers splits the opaque, non-background pixels of an image into
+// per-colour masks. Transparent pixels and the near-white background are left
+// untraced. The colours are quantised and the most populous up to
+// vectoriseMaxColourLayers kept; every other pixel is merged into the nearest
+// kept colour by RGB distance so anti-aliasing doesn't add stray layers. Each
+// layer's fill is the average of the pixels that populate it.
+func colourLayers(img image.Image) []colourLayer {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	pixels := make([]vectorPixel, w*h)
+	buckets := map[int]*colourBucket{}
+	var keys []int
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			mask[y*w+x] = pixelIsInk(img, b.Min.X+x, b.Min.Y+y)
+			r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			p := vectorPixel{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8), uint8(a >> 8)}
+			pixels[y*w+x] = p
+			if isBackgroundColour(p) {
+				continue
+			}
+			k := quantColourKey(p)
+			if buckets[k] == nil {
+				buckets[k] = &colourBucket{}
+				keys = append(keys, k)
+			}
+			bk := buckets[k]
+			bk.count++
+			bk.sumR += uint64(p.r)
+			bk.sumG += uint64(p.g)
+			bk.sumB += uint64(p.b)
 		}
 	}
 
-	return loopsToSVG(traceAllLoops(mask, w, h), w, h), nil
+	sort.Slice(keys, func(i, j int) bool {
+		if buckets[keys[i]].count != buckets[keys[j]].count {
+			return buckets[keys[i]].count > buckets[keys[j]].count
+		}
+		return keys[i] < keys[j]
+	})
+	if len(keys) > vectoriseMaxColourLayers {
+		keys = keys[:vectoriseMaxColourLayers]
+	}
+
+	layers := make([]colourLayer, 0, len(keys))
+	layerFor := make(map[int]int, len(keys))
+	for i, k := range keys {
+		bk := buckets[k]
+		layers = append(layers, colourLayer{
+			r:    uint8((bk.sumR + uint64(bk.count)/2) / uint64(bk.count)),
+			g:    uint8((bk.sumG + uint64(bk.count)/2) / uint64(bk.count)),
+			b:    uint8((bk.sumB + uint64(bk.count)/2) / uint64(bk.count)),
+			mask: make([]bool, w*h),
+		})
+		layerFor[k] = i
+	}
+
+	for idx, p := range pixels {
+		if isBackgroundColour(p) {
+			continue
+		}
+		li, ok := layerFor[quantColourKey(p)]
+		if !ok {
+			li = nearestLayer(p, layers)
+		}
+		layers[li].mask[idx] = true
+		layers[li].count++
+	}
+
+	return layers
 }
 
-// pixelIsInk reports whether the pixel at (x, y) counts as ink: dark enough
-// (below vectoriseThreshold) and sufficiently opaque. Transparent pixels are
-// treated as background so alpha-matted scans don't produce stray outlines.
-func pixelIsInk(img image.Image, x, y int) bool {
-	r, g, bl, a := img.At(x, y).RGBA()
-	if a < 0x8000 {
-		return false
+// isBackgroundColour reports whether a pixel is part of the untraced
+// background: transparent, or a near-white grey (the paper the artwork is
+// printed on).
+func isBackgroundColour(p vectorPixel) bool {
+	if p.a < 0x80 {
+		return true
 	}
-	lum := 0.2126*float64(r) + 0.7152*float64(g) + 0.0722*float64(bl)
-	return lum/65535.0 < vectoriseThreshold
+	return isNearWhite(p.r, p.g, p.b)
+}
+
+// isNearWhite reports whether the colour is close to white: bright and with
+// little chroma. Bright colours such as yellow stay foreground.
+func isNearWhite(r, g, b uint8) bool {
+	mx := max(r, max(g, b))
+	mn := min(r, min(g, b))
+	return mx > 235 && int(mx)-int(mn) < 25
+}
+
+// nearestLayer returns the index of the colour layer whose fill colour is
+// closest to the given pixel, used to absorb colours that didn't make the kept
+// layer cut.
+func nearestLayer(p vectorPixel, layers []colourLayer) int {
+	best, bestDist := 0, int(^uint(0)>>1)
+	for i, l := range layers {
+		dr := int(p.r) - int(l.r)
+		dg := int(p.g) - int(l.g)
+		db := int(p.b) - int(l.b)
+		if d := dr*dr + dg*dg + db*db; d < bestDist {
+			best, bestDist = i, d
+		}
+	}
+	return best
 }
 
 // ipoint is an integer grid point on the boundary grid. Boundary paths move
@@ -854,19 +969,27 @@ func roundCoord(v float64) int {
 	return int(math.Round(v))
 }
 
-// loopsToSVG assembles the traced loops into an SVG document. All loops are
-// combined into one path filled with the even-odd rule, so holes and nested
-// shapes are rendered correctly and the document stays small.
-func loopsToSVG(loops [][]ipoint, w, h int) []byte {
+// colourLoopsToSVG assembles the traced colour layers into an SVG document.
+// Each layer becomes a group filled with its colour containing the traced
+// loops of its mask, combined into one path per layer with the even-odd rule so
+// holes and nested shapes render correctly.
+func colourLoopsToSVG(layers []colourLayer, w, h int) []byte {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">`+"\n", w, h, w, h)
-	if len(loops) > 0 {
-		b.WriteString("  <path d=\"")
-		for _, loop := range loops {
-			b.WriteString(loopPathData(loop))
+	for _, layer := range layers {
+		if layer.count == 0 {
+			continue
 		}
-		b.WriteString("\" fill=\"#000000\" fill-rule=\"evenodd\"/>\n")
+		fmt.Fprintf(&b, "  <g fill=\"#%02x%02x%02x\">\n", layer.r, layer.g, layer.b)
+		if loops := traceAllLoops(layer.mask, w, h); len(loops) > 0 {
+			b.WriteString("    <path d=\"")
+			for _, loop := range loops {
+				b.WriteString(loopPathData(loop))
+			}
+			b.WriteString("\" fill-rule=\"evenodd\"/>\n")
+		}
+		b.WriteString("  </g>\n")
 	}
 	b.WriteString("</svg>\n")
 	return []byte(b.String())

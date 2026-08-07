@@ -1724,6 +1724,108 @@ func pngOf(w, h int, ink func(x, y int) bool) []byte {
 	return buf.Bytes()
 }
 
+// pngOfColour encodes a w×h RGBA PNG; colour(x, y) selects each pixel.
+func pngOfColour(w, h int, colour func(x, y int) color.RGBA) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetRGBA(x, y, colour(x, y))
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+func TestColourLayersSplitByColour(t *testing.T) {
+	src := pngOfColour(8, 8, func(x, y int) color.RGBA {
+		if x >= 1 && x <= 3 && y >= 1 && y <= 3 {
+			return color.RGBA{255, 0, 0, 255}
+		}
+		if x >= 5 && x <= 7 && y >= 5 && y <= 7 {
+			return color.RGBA{0, 0, 255, 255}
+		}
+		return color.RGBA{255, 255, 255, 255}
+	})
+	img, _, err := image.Decode(bytes.NewReader(src))
+	if err != nil {
+		t.Fatalf("failed to decode test image: %v", err)
+	}
+
+	layers := colourLayers(img)
+	if len(layers) != 2 {
+		t.Fatalf("got %d colour layers, want 2", len(layers))
+	}
+	fills := map[string]bool{}
+	for _, l := range layers {
+		fills[fmt.Sprintf("%02x%02x%02x", l.r, l.g, l.b)] = true
+		if l.count != 9 {
+			t.Errorf("layer #%02x%02x%02x has %d pixels, want 9", l.r, l.g, l.b, l.count)
+		}
+	}
+	if !fills["ff0000"] || !fills["0000ff"] {
+		t.Errorf("layer fills = %v, want ff0000 and 0000ff", fills)
+	}
+}
+
+func TestColourLayersAllWhiteNoLayers(t *testing.T) {
+	src := pngOfColour(4, 4, func(x, y int) color.RGBA { return color.RGBA{255, 255, 255, 255} })
+	img, _, err := image.Decode(bytes.NewReader(src))
+	if err != nil {
+		t.Fatalf("failed to decode test image: %v", err)
+	}
+	if layers := colourLayers(img); len(layers) != 0 {
+		t.Errorf("all-white image produced %d layers, want 0", len(layers))
+	}
+}
+
+func TestNearWhiteKeepsBrightColours(t *testing.T) {
+	if !isNearWhite(255, 255, 255) {
+		t.Errorf("white not treated as near-white background")
+	}
+	if !isNearWhite(248, 248, 248) {
+		t.Errorf("light grey not treated as near-white background")
+	}
+	if isNearWhite(255, 255, 0) {
+		t.Errorf("yellow incorrectly treated as near-white background")
+	}
+	if isNearWhite(135, 206, 250) {
+		t.Errorf("light blue incorrectly treated as near-white background")
+	}
+}
+
+func TestVectoriseBitmapColourLayers(t *testing.T) {
+	src := pngOfColour(8, 8, func(x, y int) color.RGBA {
+		if x >= 1 && x <= 3 && y >= 1 && y <= 3 {
+			return color.RGBA{0, 0, 0, 255}
+		}
+		if x >= 5 && x <= 7 && y >= 5 && y <= 7 {
+			return color.RGBA{255, 255, 0, 255}
+		}
+		return color.RGBA{255, 255, 255, 255}
+	})
+
+	svg, err := vectoriseBitmap(src)
+	if err != nil {
+		t.Fatalf("vectoriseBitmap returned error: %v", err)
+	}
+	body := string(svg)
+	if !strings.Contains(body, `fill="#000000"`) {
+		t.Errorf("SVG missing the black layer fill: %s", body)
+	}
+	if !strings.Contains(body, `fill="#ffff00"`) {
+		t.Errorf("SVG missing the yellow layer fill: %s", body)
+	}
+	if strings.Count(body, "<g fill=") != 2 {
+		t.Errorf("expected 2 colour groups, got %d", strings.Count(body, "<g fill="))
+	}
+	if !bytes.Contains(svg, []byte(`fill-rule="evenodd"`)) {
+		t.Errorf("SVG is missing the even-odd fill rule")
+	}
+}
+
 func TestVectoriseBitmapProducesSVG(t *testing.T) {
 	src := pngOf(4, 4, func(x, y int) bool { return x >= 1 && x <= 2 && y >= 1 && y <= 2 })
 
