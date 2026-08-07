@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const processSpinner = document.getElementById('process-spinner');
   const processLabel = document.getElementById('process-label');
   const promptText = document.getElementById('prompt-text');
+  const vectoriseCheck = document.getElementById('chk-vectorise');
 
   const resultCard = document.getElementById('result-card');
   const resultImage = document.getElementById('result-image');
@@ -557,6 +558,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const prompt = promptText.value.trim();
       if (prompt) form.append('prompt', prompt);
       if (lastOutputFile) form.append('output', lastOutputFile);
+      if (vectoriseCheck.checked) form.append('vectorise', 'true');
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
       lastOutputFile = data.filename;
       resultImage.src =
@@ -564,6 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
         encodeURIComponent(data.filename) +
         '?t=' +
         encodeURIComponent(data.processed_at);
+      resultImage.classList.toggle('vector', data.vectorised === true);
       resultFilename.textContent = data.filename;
       resultDownload.href = 'api/v1/images/' + encodeURIComponent(data.filename);
       resultDownload.setAttribute('download', data.filename);
@@ -590,6 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
     noImage.classList.remove('d-none');
     resultCard.classList.add('d-none');
     resultImage.src = '';
+    resultImage.classList.remove('vector');
     processStatus.textContent = '';
     setProcessing(false);
     btnProcess.disabled = true;

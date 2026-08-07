@@ -8,6 +8,7 @@ The web interface lets you take a photo with your device camera or upload (or dr
 
 - **Image Capture**: Take photos directly with your device camera (via `getUserMedia`) or upload (or drag and drop) image files from your machine.
 - **OpenRouter Processing**: Captured images are sent to an image model on OpenRouter, which returns the processed version of the image.
+- **Vectorise to SVG**: Optionally trace the processed image into a resolution-independent SVG document, ideal for logos, diagrams and clean black-and-white artwork that needs to scale without pixelation.
 - **File System Storage**: The processed image is saved to a configurable output directory.
 - **Single Executable Deployment**: Uses Go's `embed` package to bundle the frontend HTML / CSS / JavaScript assets, documentation and OpenAPI specifications into a single binary.
 - **Offline Operation**: Designed to be able to operate without internet access; all UI libraries and documentation resources are served locally. (Note: processing an image needs internet access to reach OpenRouter.)
@@ -65,6 +66,10 @@ The UI shows the total cost of the current session (in US dollars, formatted to 
 ## Choosing a Model
 
 The **Models** button in the top bar opens a searchable list of the OpenRouter models that can process an image and return a processed image (fetched live from OpenRouter's `/api/v1/images/models` endpoint, which requires your OpenRouter API key, and cached briefly), together with the cost of processing a single image with each one. Click any row to make that model active immediately; the currently configured model is marked *active*. The images listing covers every image model, including image-to-image models such as the Recraft family that the general models endpoint omits. When OpenRouter publishes an exact per-image price for a model it is used; otherwise the cost is estimated from the model's published per-token rates assuming a typical 1024x1024 image plus a generated image output. Prices change, so treat the figures as guidance and check OpenRouter before committing to a model.
+
+## Vectorising Results to SVG
+
+Tick the **Convert result to SVG** box above the Process button and the processed image is traced into a resolution-independent SVG document before being saved, so it can be scaled to any size without pixelation or saved for use in vector drawing tools. The trace is done entirely inside the executable by an embedded vectoriser (in `main.go`) using only the Go standard library: dark pixels of the processed image are followed around their boundaries, genuine corners are detected, and each stretch of boundary is fitted with smooth cubic bezier curves. The SVG uses the even-odd fill rule so holes and enclosed shapes trace correctly. Images the model already returns as SVG (some models can be asked directly for vector output) are saved as-is. If the model's output is a format the tracer cannot decode, the request is rejected with a clear error rather than silently saved untraced.
 
 ### Server
 

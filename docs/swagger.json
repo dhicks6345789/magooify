@@ -281,6 +281,12 @@
                         "description": "Optional filename to write the processed image to, replacing any existing file with that name",
                         "name": "output",
                         "in": "formData"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Trace the processed image into an SVG document (true/1/on/yes)",
+                        "name": "vectorise",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -507,7 +513,7 @@
                 },
                 "filename": {
                     "type": "string",
-                    "example": "img-20260806-123000-a1b2c3d4.jpg"
+                    "example": "img-20260806-123000-a1b2c3d4.svg"
                 },
                 "model": {
                     "type": "string",
@@ -518,6 +524,11 @@
                 },
                 "session_cost": {
                     "type": "number"
+                },
+                "vectorised": {
+                    "description": "Vectorised reports whether the stored result is an SVG document (either\ntraced from the processed bitmap or passed through because the model\nreturned SVG already).",
+                    "type": "boolean",
+                    "example": false
                 }
             }
         },

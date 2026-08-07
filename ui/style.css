@@ -87,6 +87,10 @@ body {
   border-radius: 0.5rem;
 }
 
+.result-img.vector {
+  background: #fff;
+}
+
 #models-tbody tr {
   cursor: pointer;
 }

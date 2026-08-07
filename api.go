@@ -120,6 +120,10 @@ type ProcessImageRequest struct {
 	Filename string `json:"filename" example:"photo.jpg"`
 	Prompt   string `json:"prompt" example:"Clean this scanned image"`
 	Output   string `json:"output" example:"img-20260806-123000-a1b2c3d4.jpg"`
+	// Vectorise traces the processed image into a resolution-independent SVG
+	// document, keeping the bitmap artwork (filled black) on a transparent
+	// background. Models that already return SVG are passed through unchanged.
+	Vectorise bool `json:"vectorise" example:"false"`
 }
 
 // ProcessImageResponse describes the outcome of processing an image. Cost is
@@ -127,11 +131,15 @@ type ProcessImageRequest struct {
 // when OpenRouter did not report a cost), SessionCost is the total spent since
 // the application started.
 type ProcessImageResponse struct {
-	Filename    string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
+	Filename    string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.svg"`
 	Model       string    `json:"model" example:"google/gemini-3.1-flash-lite-image"`
 	ProcessedAt time.Time `json:"processed_at"`
 	Cost        float64   `json:"cost"`
 	SessionCost float64   `json:"session_cost"`
+	// Vectorised reports whether the stored result is an SVG document (either
+	// traced from the processed bitmap or passed through because the model
+	// returned SVG already).
+	Vectorised bool `json:"vectorised" example:"false"`
 }
 
 // CreditsResponse describes the OpenRouter account balance and the spend since
@@ -810,6 +818,7 @@ type imagePayload struct {
 	contentType string
 	prompt      string
 	output      string
+	vectorise   bool
 }
 
 // processImage accepts an image (multipart upload or JSON base64/data URL),
@@ -822,6 +831,7 @@ type imagePayload struct {
 // @Param image formData file true "Image to process"
 // @Param prompt formData string false "Prompt to send with the image; defaults to the configured prompt"
 // @Param output formData string false "Optional filename to write the processed image to, replacing any existing file with that name"
+// @Param vectorise formData bool false "Trace the processed image into an SVG document (true/1/on/yes)"
 // @Success 200 {object} ProcessImageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
@@ -855,6 +865,15 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if pl.vectorise {
+		if vectorised, verr := vectoriseBitmap(processed); verr == nil {
+			processed = vectorised
+		} else {
+			a.jsonError(w, http.StatusBadRequest, "Cannot vectorise the processed image: "+verr.Error())
+			return
+		}
+	}
+
 	a.mu.Lock()
 	a.sessionCost += cost
 	sessionCost := a.sessionCost
@@ -873,6 +892,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		ProcessedAt: time.Now().UTC(),
 		Cost:        cost,
 		SessionCost: sessionCost,
+		Vectorised:  pl.vectorise,
 	})
 }
 
@@ -894,10 +914,11 @@ func readImagePayload(r *http.Request) (*imagePayload, error) {
 			return nil, errors.New("Invalid base64 image payload")
 		}
 		return &imagePayload{
-			img:      img,
-			filename: req.Filename,
-			prompt:   req.Prompt,
-			output:   req.Output,
+			img:       img,
+			filename:  req.Filename,
+			prompt:    req.Prompt,
+			output:    req.Output,
+			vectorise: req.Vectorise,
 		}, nil
 	}
 
@@ -923,7 +944,18 @@ func readImagePayload(r *http.Request) (*imagePayload, error) {
 		contentType: hdr.Header.Get("Content-Type"),
 		prompt:      r.FormValue("prompt"),
 		output:      r.FormValue("output"),
+		vectorise:   parseBoolValue(r.FormValue("vectorise")),
 	}, nil
+}
+
+// parseBoolValue interprets a form value as a boolean, accepting "true", "1",
+// "on" and "yes" (case-insensitive) as true and everything else as false.
+func parseBoolValue(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "1", "on", "yes":
+		return true
+	}
+	return false
 }
 
 // processWithOpenRouter sends the image to the configured OpenRouter image

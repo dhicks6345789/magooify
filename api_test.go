@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"math"
 	"mime"
 	"mime/multipart"
@@ -1699,5 +1702,241 @@ func TestPerImageCost(t *testing.T) {
 	}
 	if cost, known := perImageCost(0, 0, imageOutputTokenEstimate); cost != 0 || known {
 		t.Errorf("perImageCost(none) = %v/%v, want 0/false", cost, known)
+	}
+}
+
+// pngOf encodes a w×h black-and-white PNG; ink(x, y) selects the black pixels.
+func pngOf(w, h int, ink func(x, y int) bool) []byte {
+	img := image.NewGray(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if ink(x, y) {
+				img.SetGray(x, y, color.Gray{Y: 0})
+			} else {
+				img.SetGray(x, y, color.Gray{Y: 255})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+func TestVectoriseBitmapProducesSVG(t *testing.T) {
+	src := pngOf(4, 4, func(x, y int) bool { return x >= 1 && x <= 2 && y >= 1 && y <= 2 })
+
+	svg, err := vectoriseBitmap(src)
+	if err != nil {
+		t.Fatalf("vectoriseBitmap returned error: %v", err)
+	}
+	if !bytes.HasPrefix(svg, []byte(`<?xml`)) || !bytes.Contains(svg, []byte("<svg")) {
+		t.Errorf("output is not an SVG document: %s", svg)
+	}
+	if !bytes.Contains(svg, []byte(`width="4"`)) || !bytes.Contains(svg, []byte(`height="4"`)) {
+		t.Errorf("SVG is missing the image dimensions: %s", svg)
+	}
+	if !bytes.Contains(svg, []byte(`<path d="M`)) {
+		t.Errorf("SVG has no traced path: %s", svg)
+	}
+	if !bytes.Contains(svg, []byte(`fill-rule="evenodd"`)) {
+		t.Errorf("SVG is missing the even-odd fill rule: %s", svg)
+	}
+}
+
+func TestVectoriseBitmapPassesThroughSVG(t *testing.T) {
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><path d="M0 0"/></svg>`)
+	got, err := vectoriseBitmap(svg)
+	if err != nil {
+		t.Fatalf("vectoriseBitmap returned error: %v", err)
+	}
+	if !bytes.Equal(got, svg) {
+		t.Errorf("SVG input was not passed through unchanged")
+	}
+}
+
+func TestVectoriseBitmapRejectsUndecodableInput(t *testing.T) {
+	if _, err := vectoriseBitmap([]byte("this is not an image")); err == nil {
+		t.Errorf("expected an error for undecodable input, got none")
+	}
+}
+
+func TestTraceAllLoopsSingleSquare(t *testing.T) {
+	w, h := 3, 3
+	mask := make([]bool, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			mask[y*w+x] = x == 1 && y == 1
+		}
+	}
+
+	loops := traceAllLoops(mask, w, h)
+	if len(loops) != 1 {
+		t.Fatalf("got %d loops, want 1", len(loops))
+	}
+	loop := loops[0]
+	if len(loop) != 4 {
+		t.Fatalf("loop has %d points, want 4 (the unit square's boundary)", len(loop))
+	}
+	for _, p := range loop {
+		if p.x < 1 || p.x > 2 || p.y < 1 || p.y > 2 {
+			t.Errorf("loop point %v is outside the expected unit square", p)
+		}
+	}
+}
+
+func TestTraceAllLoopsSquareWithHole(t *testing.T) {
+	w, h := 5, 5
+	mask := make([]bool, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			mask[y*w+x] = x >= 1 && x <= 3 && y >= 1 && y <= 3 && !(x == 2 && y == 2)
+		}
+	}
+
+	loops := traceAllLoops(mask, w, h)
+	if len(loops) != 2 {
+		t.Fatalf("got %d loops, want 2 (outer boundary + hole)", len(loops))
+	}
+}
+
+func TestTraceAllLoopsDisconnectedComponents(t *testing.T) {
+	w, h := 6, 6
+	mask := make([]bool, w*h)
+	// Two separate 1x1 squares with a white gap between them.
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			mask[y*w+x] = (x == 1 && y == 1) || (x == 4 && y == 4)
+		}
+	}
+
+	loops := traceAllLoops(mask, w, h)
+	if len(loops) != 2 {
+		t.Fatalf("got %d loops, want 2 (one per component)", len(loops))
+	}
+}
+
+func TestSimplifyCollinearRemovesIntermediatePoints(t *testing.T) {
+	poly := []ipoint{{0, 0}, {1, 0}, {2, 0}, {2, 1}, {2, 2}, {1, 2}, {0, 2}, {0, 1}}
+	simple, idx := simplifyCollinear(poly)
+	if len(simple) != 4 {
+		t.Fatalf("simplified polygon has %d vertices, want 4", len(simple))
+	}
+	if len(idx) != len(simple) {
+		t.Errorf("index mapping has %d entries for %d vertices", len(idx), len(simple))
+	}
+}
+
+func TestDetectCornersSquare(t *testing.T) {
+	square := []ipoint{
+		{1, 1}, {2, 1}, {3, 1}, {4, 1}, {5, 1},
+		{5, 2}, {5, 3}, {5, 4}, {5, 5},
+		{4, 5}, {3, 5}, {2, 5}, {1, 5},
+		{1, 4}, {1, 3}, {1, 2},
+	}
+	simple, _ := simplifyCollinear(square)
+	if len(simple) != 4 {
+		t.Fatalf("simplified square has %d vertices, want 4", len(simple))
+	}
+	corners := detectCorners(simple)
+	if len(corners) != 4 {
+		t.Errorf("square has %d corners, want 4", len(corners))
+	}
+}
+
+func TestDetectCornersDiagonalHasNoCorners(t *testing.T) {
+	// A diagonal staircase approximates a straight line and must not be
+	// chopped into corners (the run is a single smooth curve instead).
+	diag := []ipoint{{0, 0}, {1, 1}, {2, 2}, {3, 3}, {4, 4}, {5, 5}}
+	if corners := detectCorners(diag); len(corners) != 0 {
+		t.Errorf("diagonal has %d corners, want 0", len(corners))
+	}
+}
+
+func TestProcessImageVectorise(t *testing.T) {
+	src := pngOf(4, 4, func(x, y int) bool { return x >= 1 && x <= 2 && y >= 1 && y <= 2 })
+	processedPNG := base64.StdEncoding.EncodeToString(src)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`, processedPNG)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(miniPNG)
+	mw.WriteField("vectorise", "true")
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Vectorised {
+		t.Errorf("vectorised = false, want true")
+	}
+	if !strings.HasSuffix(resp.Filename, ".svg") {
+		t.Errorf("filename = %q, want a .svg name", resp.Filename)
+	}
+	stored, err := os.ReadFile(filepath.Join(a.outputDir, resp.Filename))
+	if err != nil {
+		t.Fatalf("failed to read stored SVG: %v", err)
+	}
+	if !bytes.Contains(stored, []byte("<svg")) {
+		t.Errorf("stored file is not an SVG document")
+	}
+}
+
+func TestProcessImageVectoriseJSONFlag(t *testing.T) {
+	src := pngOf(4, 4, func(x, y int) bool { return x >= 1 && x <= 2 && y >= 1 && y <= 2 })
+	processedPNG := base64.StdEncoding.EncodeToString(src)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`, processedPNG)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	payload := fmt.Sprintf(`{"image":"data:image/png;base64,%s","vectorise":true}`,
+		base64.StdEncoding.EncodeToString(miniPNG))
+	req := httptest.NewRequest("POST", "/api/v1/process", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Vectorised {
+		t.Errorf("vectorised = false, want true")
+	}
+	if !strings.HasSuffix(resp.Filename, ".svg") {
+		t.Errorf("filename = %q, want a .svg name", resp.Filename)
 	}
 }

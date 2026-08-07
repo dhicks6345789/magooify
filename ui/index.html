@@ -67,6 +67,10 @@
               <textarea id="prompt-text" class="form-control mt-2" rows="4" aria-label="Prompt sent with the image"></textarea>
             </div>
           </div>
+          <div class="form-check form-switch mt-3">
+            <input class="form-check-input" type="checkbox" id="chk-vectorise" role="switch" />
+            <label class="form-check-label small" for="chk-vectorise">Convert result to SVG (vectorise the processed image)</label>
+          </div>
           <button type="button" id="btn-process" class="btn btn-success btn-lg w-100 mt-2" disabled>
             <span class="spinner-border spinner-border-sm me-2 d-none" id="process-spinner" aria-hidden="true"></span>
             <span id="process-label">Process</span>
