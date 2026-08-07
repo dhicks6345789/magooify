@@ -2,6 +2,37 @@ document.addEventListener('DOMContentLoaded', () => {
   const connBadge = document.getElementById('conn-badge');
   const creditInfo = document.getElementById('credit-info');
 
+  // Theme toggle: light is the default, a saved preference wins, and the
+  // choice is remembered for the next visit.
+  const themeToggle = document.getElementById('theme-toggle');
+  const themeIconMoon = document.getElementById('theme-icon-moon');
+  const themeIconSun = document.getElementById('theme-icon-sun');
+
+  const applyTheme = (theme) => {
+    document.documentElement.dataset.bsTheme = theme;
+    themeToggle.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    themeIconMoon.classList.toggle('d-none', theme === 'dark');
+    themeIconSun.classList.toggle('d-none', theme === 'light');
+  };
+
+  let savedTheme = null;
+  try {
+    savedTheme = localStorage.getItem('magooify-theme');
+  } catch (e) {
+    /* localStorage unavailable; keep the default */
+  }
+  applyTheme(savedTheme === 'dark' ? 'dark' : 'light');
+
+  themeToggle.addEventListener('click', () => {
+    const next = document.documentElement.dataset.bsTheme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    try {
+      localStorage.setItem('magooify-theme', next);
+    } catch (e) {
+      /* storage unavailable; the choice just won't persist */
+    }
+  });
+
   // OpenRouter balances are US dollars; format them with the browser's locale
   // so separators, symbol placement and formatting follow local conventions.
   const currencyFmt = new Intl.NumberFormat(navigator.language || 'en', {
