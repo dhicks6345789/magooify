@@ -419,6 +419,15 @@ const vectoriseMaxFitError = 1.5
 // fpoint is a floating-point grid point used while fitting curves.
 type fpoint struct{ x, y float64 }
 
+// isSVGDocument reports whether the bytes look like an SVG document rather
+// than a raster image. Both a bare <svg> root and an XML prolog followed by an
+// <svg> root are recognised.
+func isSVGDocument(img []byte) bool {
+	trimmed := bytes.TrimLeft(img, " \t\r\n")
+	return bytes.HasPrefix(trimmed, []byte("<svg")) ||
+		(bytes.HasPrefix(trimmed, []byte("<?xml")) && bytes.Contains(trimmed, []byte("<svg")))
+}
+
 // vectoriseBitmap converts a processed bitmap into an SVG document tracing the
 // ink pixels into smooth vector paths. Bitmap formats supported by the
 // standard library (PNG, JPEG, GIF) are accepted; an image that is already
@@ -426,9 +435,7 @@ type fpoint struct{ x, y float64 }
 // has a transparent background with the traced ink filled black, sized to the
 // source image.
 func vectoriseBitmap(imgBytes []byte) ([]byte, error) {
-	trimmed := bytes.TrimLeft(imgBytes, " \t\r\n")
-	if bytes.HasPrefix(trimmed, []byte("<svg")) ||
-		(bytes.HasPrefix(trimmed, []byte("<?xml")) && bytes.Contains(trimmed, []byte("<svg"))) {
+	if isSVGDocument(imgBytes) {
 		return imgBytes, nil
 	}
 

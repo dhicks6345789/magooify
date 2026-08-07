@@ -892,7 +892,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		ProcessedAt: time.Now().UTC(),
 		Cost:        cost,
 		SessionCost: sessionCost,
-		Vectorised:  pl.vectorise,
+		Vectorised:  isSVGDocument(processed),
 	})
 }
 
@@ -1265,7 +1265,12 @@ func decodeDataURL(s string) ([]byte, bool) {
 
 // storeResult writes the processed image to the configured output directory
 // under a unique timestamped base name, or under the given output filename when
-// one is supplied (overwriting any existing file with that name).
+// one is supplied (overwriting any existing file with that name). The stored
+// extension always matches the content: when a supplied output name carries an
+// extension that does not fit the bytes (for example a .jpg name for SVG
+// output after toggling vectorisation), the same base name is used with the
+// correct extension and the stale file left over from the previous extension
+// is removed first.
 func (a *api) storeResult(img []byte, output string) (string, error) {
 	if err := os.MkdirAll(a.outputDir, 0o755); err != nil {
 		return "", err
@@ -1279,6 +1284,18 @@ func (a *api) storeResult(img []byte, output string) (string, error) {
 		// traversal is not possible.
 		if filepath.Base(imageFile) != imageFile || imageFile == "." || imageFile == ".." {
 			return "", errors.New("invalid output filename")
+		}
+		if wantExt := extensionForContent(img); wantExt != "" {
+			oldExt := filepath.Ext(imageFile)
+			if strings.ToLower(oldExt) != wantExt {
+				stale := filepath.Join(a.outputDir, imageFile)
+				if _, err := os.Stat(stale); err == nil {
+					if err := os.Remove(stale); err != nil {
+						return "", errors.New("failed to remove the previous version: " + err.Error())
+					}
+				}
+				imageFile = strings.TrimSuffix(imageFile, oldExt) + wantExt
+			}
 		}
 	}
 
@@ -1301,9 +1318,7 @@ func uniqueName() string {
 // extensionForContent picks the file extension for a generated image, detecting
 // vector (SVG) output by its markup before falling back to content sniffing.
 func extensionForContent(img []byte) string {
-	trimmed := bytes.TrimLeft(img, " \t\r\n")
-	if bytes.HasPrefix(trimmed, []byte("<svg")) ||
-		(bytes.HasPrefix(trimmed, []byte("<?xml")) && bytes.Contains(trimmed, []byte("<svg"))) {
+	if isSVGDocument(img) {
 		return ".svg"
 	}
 	return extensionForContentType(http.DetectContentType(img))

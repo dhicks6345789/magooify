@@ -1905,6 +1905,125 @@ func TestProcessImageVectorise(t *testing.T) {
 	}
 }
 
+func TestStoreResultKeepsMatchingExtension(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	name, err := a.storeResult(miniPNG, "result.png")
+	if err != nil {
+		t.Fatalf("storeResult returned error: %v", err)
+	}
+	if name != "result.png" {
+		t.Errorf("stored name = %q, want result.png (unchanged)", name)
+	}
+	entries, _ := os.ReadDir(a.outputDir)
+	if len(entries) != 1 {
+		t.Errorf("output dir has %d files, want 1", len(entries))
+	}
+}
+
+func TestStoreResultCorrectsExtensionToContent(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><path d="M0 0"/></svg>`)
+
+	// A previous bitmap version under the same base name is replaced by the
+	// SVG version, keeping the base name but changing the extension.
+	if err := os.WriteFile(filepath.Join(a.outputDir, "result.png"), miniPNG, 0o644); err != nil {
+		t.Fatalf("failed to write previous version: %v", err)
+	}
+	name, err := a.storeResult(svg, "result.png")
+	if err != nil {
+		t.Fatalf("storeResult returned error: %v", err)
+	}
+	if name != "result.svg" {
+		t.Errorf("stored name = %q, want result.svg (same base, new extension)", name)
+	}
+	if _, err := os.Stat(filepath.Join(a.outputDir, "result.png")); !os.IsNotExist(err) {
+		t.Errorf("stale result.png was not removed")
+	}
+	stored, err := os.ReadFile(filepath.Join(a.outputDir, "result.svg"))
+	if err != nil {
+		t.Fatalf("failed to read stored SVG: %v", err)
+	}
+	if !bytes.Equal(stored, svg) {
+		t.Errorf("stored bytes do not match the SVG content")
+	}
+
+	// And back again: an SVG output name with bitmap content is stored under
+	// the bitmap extension, removing the stale SVG version.
+	name, err = a.storeResult(miniPNG, "result.svg")
+	if err != nil {
+		t.Fatalf("storeResult returned error: %v", err)
+	}
+	if name != "result.png" {
+		t.Errorf("stored name = %q, want result.png (same base, new extension)", name)
+	}
+	if _, err := os.Stat(filepath.Join(a.outputDir, "result.svg")); !os.IsNotExist(err) {
+		t.Errorf("stale result.svg was not removed")
+	}
+	if _, err := os.Stat(filepath.Join(a.outputDir, "result.png")); err != nil {
+		t.Errorf("bitmap version missing: %v", err)
+	}
+	entries, _ := os.ReadDir(a.outputDir)
+	if len(entries) != 1 {
+		t.Errorf("output dir has %d files, want 1 (old version replaced)", len(entries))
+	}
+}
+
+func TestProcessImageVectoriseReconcilesExtension(t *testing.T) {
+	src := pngOf(4, 4, func(x, y int) bool { return x >= 1 && x <= 2 && y >= 1 && y <= 2 })
+	processedPNG := base64.StdEncoding.EncodeToString(src)
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":"data:image/png;base64,%s"}}]}`, processedPNG)
+	}))
+	defer fake.Close()
+
+	a := newAPI(false, docsFS)
+	a.openRouterKey = "test-key"
+	a.openRouterURL = fake.URL
+	a.outputDir = t.TempDir()
+
+	// A previous bitmap version stored under the name the UI would resend.
+	oldName := "my-image.jpg"
+	if err := os.WriteFile(filepath.Join(a.outputDir, oldName), miniPNG, 0o644); err != nil {
+		t.Fatalf("failed to write previous version: %v", err)
+	}
+
+	payload := fmt.Sprintf(`{"image":"data:image/png;base64,%s","output":%q,"vectorise":true}`,
+		base64.StdEncoding.EncodeToString(miniPNG), oldName)
+	req := httptest.NewRequest("POST", "/api/v1/process", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Filename != "my-image.svg" {
+		t.Errorf("filename = %q, want my-image.svg (same base, new extension)", resp.Filename)
+	}
+	if !resp.Vectorised {
+		t.Errorf("vectorised = false, want true")
+	}
+	if _, err := os.Stat(filepath.Join(a.outputDir, oldName)); !os.IsNotExist(err) {
+		t.Errorf("stale %s was not removed", oldName)
+	}
+	stored, err := os.ReadFile(filepath.Join(a.outputDir, "my-image.svg"))
+	if err != nil {
+		t.Fatalf("failed to read stored SVG: %v", err)
+	}
+	if !bytes.Contains(stored, []byte("<svg")) {
+		t.Errorf("stored file is not an SVG document")
+	}
+}
+
 func TestProcessImageVectoriseJSONFlag(t *testing.T) {
 	src := pngOf(4, 4, func(x, y int) bool { return x >= 1 && x <= 2 && y >= 1 && y <= 2 })
 	processedPNG := base64.StdEncoding.EncodeToString(src)
