@@ -10,9 +10,9 @@ The application should be self-hostable by a home user. If run on a home desktop
 
 The application should use Go's "embed" package to host all needed file resources.
 
-The application should be able to operate on a machine without internet access. The user interface should be web-based, constructed using Bootstrap, with the Bootstrap library files served by the application itself. The API documentation can use Swagger UI's JavaScript libraries, but don't use any other JavaScript libraries.
+The application should be able to operate on a machine without internet access. The user interface should be web-based, constructed using Bootstrap, with the Bootstrap library files served by the application itself. The API documentation can use Swagger UI's JavaScript libraries. Any other libraries added should be able to be served by the application itself. Don't use React.
 
-The application should only need Go as a build tool. It can use a shell (bash) script to build. It should use Swaggo to build the API documentation. It shouldn't need to use Python.
+The application should only need Go as a build tool. It can use a shell (bash) script to build. It should use Swaggo to build the API documentation. It shouldn't need to use Python or Node.js.
 
 The Go application should consist of one "main.go" file and one "api.go" file, with an additional api_test.go file. All API calls go in the API.go file, API tests go in api_test.go, everything else goes in main.go.
 
