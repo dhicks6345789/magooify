@@ -113,11 +113,3 @@ You can build executables and generate documentation, including Swaggo's interac
 ```
 bash build.sh dist ~/www/magooify
 ```
-
-## Using As a Basis For Your Own Projects
-
-The purpose of this project is to act as a basic starting point for a self-contained "app" that is easy for end users to run and use. It should produce executables able to run on your preferred platform, either as a "desktop app" (a local-only server with a web interface) or as a compact server. Compiling and running the project gives you an image capture and processing application that calls OpenRouter and stores the results on disk, useful to test your build process and that any authentication / endpoint routing is working okay.
-
-Extending this project should be a case of cloning the Git repository and adding your own functions to `api.go` and user interface elements to `ui/index.html`, either by hand or by instructing an AI coding agent. An AGENTS.md is included.
-
-This project was built using OpenCode and its "Big Pickle" model (free, as of August 2026), an instance of GLM-4.6. Documentation (this README) was written by hand.
