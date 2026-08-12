@@ -575,6 +575,43 @@ func TestProcessPromptFallsBackWhenCustomFileMissing(t *testing.T) {
 	}
 }
 
+func TestApplyPalettePromptReplacesColourLine(t *testing.T) {
+	base := "Clean the image. Limit the colour palette to 16 colours, rendering any colours found to their nearest-fit colour."
+	got := applyPalettePrompt(base, "crayola-4")
+	if strings.Contains(got, "16 colours") {
+		t.Errorf("palette prompt still has the original 16-colour line: %s", got)
+	}
+	for _, want := range []string{"white plus these 4 colours:", "#ed0a3f", "#0066cc", "rendering any colours found to their nearest-fit colour."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("palette prompt missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestApplyPalettePromptPreservesUnrelatedSentences(t *testing.T) {
+	base := "Clean the image. Expand colours fully. Limit the colour palette to 16 colours, rendering any colours found to their nearest-fit colour."
+	got := applyPalettePrompt(base, "berol-12")
+	for _, want := range []string{"Clean the image.", "Expand colours fully.", "white plus these 12 colours:"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("palette prompt missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestApplyPalettePromptLeavesStringWhenNoPalette(t *testing.T) {
+	base := "Limit the colour palette to 16 colours, rendering any colours found to their nearest-fit colour."
+	if got := applyPalettePrompt(base, ""); got != base {
+		t.Errorf("empty palette should leave the prompt unchanged, got %q", got)
+	}
+}
+
+func TestApplyPalettePromptUnknownIDReturnsBase(t *testing.T) {
+	base := "Limit the colour palette to 16 colours, rendering any colours found to their nearest-fit colour."
+	if got := applyPalettePrompt(base, "not-a-palette"); got != base {
+		t.Errorf("unknown palette should leave the prompt unchanged, got %q", got)
+	}
+}
+
 func TestProcessImageNoKey(t *testing.T) {
 	a := newAPI(false, docsFS)
 	a.outputDir = t.TempDir()

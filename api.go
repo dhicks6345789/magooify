@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -53,6 +54,32 @@ func (a *api) processPrompt() string {
 		return p
 	}
 	return fallbackPrompt
+}
+
+// palettePromptRegexp matches any base-prompt sentence that specifies a colour
+// palette size (e.g. "Limit the colour palette to 16 colours, rendering ..."),
+// so applyPalettePrompt can drop it before appending the palette-specific line.
+var palettePromptRegexp = regexp.MustCompile(`(?i)\s*Limit the colour palette to[^.]*\.\s*`)
+
+// applyPalettePrompt returns the prompt that should be sent to the model when
+// the request was made with a fixed-colour palette. The base prompt's
+// "Limit the colour palette to N colours, rendering..." line is replaced with
+// one that names the palette colours specifically, so the model draws using
+// only those colours (the vectorise pass will quantise to them as well).
+func applyPalettePrompt(basePrompt, paletteID string) string {
+	pal, ok := findPalette(paletteID)
+	if !ok {
+		return basePrompt
+	}
+	trimmed := palettePromptRegexp.ReplaceAllString(basePrompt, " ")
+	if strings.TrimSpace(trimmed) == "" {
+		return palettePromptLine(pal)
+	}
+	trimmed = strings.TrimRight(trimmed, " ")
+	if !strings.HasSuffix(trimmed, ".") {
+		trimmed += "."
+	}
+	return trimmed + " " + palettePromptLine(pal)
 }
 
 // errOpenRouterNotConfigured is returned when the OpenRouter API key has not
@@ -884,7 +911,15 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	processed, cost, err := a.processWithOpenRouter(pl.img, pl.contentType, pl.prompt)
+	prompt := pl.prompt
+	if strings.TrimSpace(prompt) == "" {
+		prompt = a.processPrompt()
+	}
+	if pl.palette != "" {
+		prompt = applyPalettePrompt(prompt, pl.palette)
+	}
+
+	processed, cost, err := a.processWithOpenRouter(pl.img, pl.contentType, prompt)
 	if err != nil {
 		code := http.StatusBadGateway
 		if errors.Is(err, errOpenRouterNotConfigured) {

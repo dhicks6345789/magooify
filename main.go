@@ -1506,6 +1506,29 @@ func findPalette(id string) (palette, bool) {
 	return palette{}, false
 }
 
+// paletteHexList returns the palette's colours as a comma-separated list of
+// "#rrggbb" hex codes, e.g. "#ff0000, #00ff00, ...". The rendering pass at
+// /api/v1/process appends this list to the model prompt so the model knows
+// exactly which colours the SVG will be quantised to.
+func paletteHexList(p palette) string {
+	parts := make([]string, len(p.Colours))
+	for i, c := range p.Colours {
+		parts[i] = strings.ToLower(c.Hex)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// palettePromptLine returns a single sentence instructing the model to draw
+// only with white plus the palette's colours and rendering any colours found
+// to their nearest fit, e.g.
+// "Limit the colour palette to white plus these 4 colours: #ff0000, #00ff00, #0000ff, #ffff00, rendering any colours found to their nearest-fit colour."
+func palettePromptLine(p palette) string {
+	return "Limit the colour palette to white plus these " +
+		strconv.Itoa(len(p.Colours)) +
+		" colours: " + paletteHexList(p) +
+		", rendering any colours found to their nearest-fit colour."
+}
+
 // parseHexColour turns "#rrggbb" into the (r, g, b) tuple the colour layer
 // machinery uses. Returns ok=false on badly formed input.
 func parseHexColour(s string) (uint8, uint8, uint8, bool) {
