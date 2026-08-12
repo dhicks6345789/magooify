@@ -22,3 +22,11 @@ The first thing you will see is an option to either take a photo or upload an im
 Next, select if you want to palette-lock to a known set of colours. A wide range of palettes from pen, pencil and crayon sets used in UK schools are included. Selecting a known colour palette will enable processing of your image to select consistent, smooth colours for coloured areas.
 
 Select the "Vectorise" option if you want your output to be an SVG image, scaleable to fit any size and resolution of media - use your artwork in a book, on a t-shirt or a 96-sheet roadside billboard!
+
+## Running
+
+If you are a system administrator wanting to install and manage this application for your users, see the [documentation][docs/running.md].
+
+## Developers
+
+If you want to customise or extend this project you are very welcome to - see the [developers documentation](docs/developers.md) for more details.
