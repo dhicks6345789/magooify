@@ -143,10 +143,11 @@ document.addEventListener('DOMContentLoaded', () => {
       paletteSwatch.textContent = '';
       return;
     }
-    const dots = p.colours.map((c) => '<span style="display:inline-block;width:1rem;height:1rem;border-radius:50%;background:' + c.hex + ';border:1px solid rgba(0,0,0,.2);margin-right:.25rem;"></span>').join('');
-    paletteSwatch.innerHTML = '<div class="d-flex flex-wrap align-items-center gap-1 mt-1">' + dots + '</div>' +
-      '<div class="small text-secondary">' + p.colours.map((c) => c.name + ' (' + c.hex + ')').join(' · ') + '</div>';
+    const dots = p.colours.map((c) => '<span title="' + c.name + '" style="display:inline-block;width:1rem;height:1rem;border-radius:50%;background:' + c.hex + ';border:1px solid rgba(0,0,0,.2);margin-right:.25rem;"></span>').join('');
+    paletteSwatch.innerHTML = '<div class="d-flex flex-wrap align-items-center gap-1 mt-1">' + dots + '</div>';
   }
+
+  const defaultPaletteID = 'berol-24';
 
   function loadPalettes() {
     fetchJSON('api/v1/palettes')
@@ -164,13 +165,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const opt = document.createElement('option');
             opt.value = p.id;
             opt.textContent = paletteOptionLabel(p);
+            if (p.id === defaultPaletteID) {
+              opt.selected = true;
+            }
             og.appendChild(opt);
           });
           frag.appendChild(og);
         }
         paletteSelect.innerHTML = '';
         paletteSelect.appendChild(frag);
-        renderPaletteSwatch(palettes[0]);
+        const def = palettes.find((p) => p.id === defaultPaletteID) || palettes[0];
+        renderPaletteSwatch(def);
       })
       .catch(() => {
         paletteSelect.innerHTML = '';
