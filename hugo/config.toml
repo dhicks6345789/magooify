@@ -1,3 +1,6 @@
 baseURL = "/"
 title = "Magooify"
 disableKinds = ["RSS", "sitemap", "taxonomy", "term"]
+uglyURLs = true
+
+

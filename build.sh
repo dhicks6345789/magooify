@@ -135,21 +135,33 @@ index() {
     echo 'title: "Magooify"'
     echo "---"
     echo
-    cat README.md
-    echo
+    sed -e 's|](docs/running.md)|](running.html)|g' \
+        -e 's|](docs/developers.md)|](developers.html)|g' \
+        README.md
+  } > "$HUGO_SITE/content/_index.md"
+
+  {
+    echo "---"
+    echo 'title: "Running"'
     echo "---"
     echo
     cat docs/running.md
-    echo
+  } > "$HUGO_SITE/content/running.md"
+
+  {
+    echo "---"
+    echo 'title: "Developers"'
     echo "---"
     echo
     cat docs/developers.md
-  } > "$HUGO_SITE/content/_index.md"
+  } > "$HUGO_SITE/content/developers.md"
 
   write_downloads_data
   hugo --source "$HUGO_SITE" --destination public
   cp "$HUGO_SITE/public/index.html" ./index.html
-  echo "==> Generated: ./index.html"
+  cp "$HUGO_SITE/public/running.html" ./running.html
+  cp "$HUGO_SITE/public/developers.html" ./developers.html
+  echo "==> Generated: ./index.html, ./running.html, ./developers.html"
 }
 
 dist() {
@@ -182,6 +194,8 @@ dist() {
   echo "==> Staging distribution files to $dest..."
   mkdir -p "$dest/docs"
   cp index.html "$dest/"
+  [ -f running.html ] && cp running.html "$dest/"
+  [ -f developers.html ] && cp developers.html "$dest/"
   cp -r docs/* "$dest/docs/"
   cp dist/* "$dest/"
   echo "==> Distribution complete: $dest"
