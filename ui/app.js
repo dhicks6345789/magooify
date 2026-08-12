@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultCard = document.getElementById('result-card');
   const resultImage = document.getElementById('result-image');
   const resultDownload = document.getElementById('result-download');
+  const resultDownloadLabel = document.getElementById('result-download-label');
   const resultModel = document.getElementById('result-model');
   const resultTime = document.getElementById('result-time');
   const btnReset = document.getElementById('btn-reset');
@@ -706,7 +707,7 @@ document.addEventListener('DOMContentLoaded', () => {
         '?t=' +
         encodeURIComponent(data.processed_at);
       resultImage.classList.toggle('vector', data.vectorised === true);
-      resultDownload.textContent = 'Download ' + data.filename;
+      resultDownloadLabel.textContent = 'Download ' + data.filename;
       resultDownload.href = 'api/v1/images/' + encodeURIComponent(data.filename);
       resultDownload.setAttribute('download', data.filename);
       resultModel.textContent = data.model;
