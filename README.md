@@ -25,7 +25,7 @@ Select the "Vectorise" option if you want your output to be an SVG image, scalea
 
 ## Running
 
-If you are a system administrator wanting to install and manage this application for your users, see the [documentation][docs/running.md].
+If you are a system administrator wanting to install and manage this application for your users, see the [documentation](docs/running.md).
 
 ## Developers
 
