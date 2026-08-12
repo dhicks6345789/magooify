@@ -22,26 +22,3 @@ The first thing you will see is an option to either take a photo or upload an im
 Next, select if you want to palette-lock to a known set of colours. A wide range of palettes from pen, pencil and crayon sets used in UK schools are included. Selecting a known colour palette will enable processing of your image to select consistent, smooth colours for coloured areas.
 
 Select the "Vectorise" option if you want your output to be an SVG image, scaleable to fit any size and resolution of media - use your artwork in a book, on a t-shirt or a 96-sheet roadside billboard!
-
-## Building
-
-Clone the repository:
-
-```
-git clone https://github.com/dhicks6345789/magooify.git
-```
-
-And run build:
-
-```
-cd magooify
-bash build.sh build-all
-```
-
-This will compile the executables for all platforms.
-
-You can build executables and generate documentation, including Swaggo's interactive API documentation, and copy the lot directly to somewhere they can be served as a web site to act as a project homepage using "build.sh dist". You just need to specify the path you want the files to go to, e.g.:
-
-```
-bash build.sh dist ~/www/magooify
-```
