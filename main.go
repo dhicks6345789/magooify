@@ -1015,6 +1015,7 @@ func buildHandler(a *api, basePaths []string) http.Handler {
 	mux.HandleFunc("/api/v1/health", a.health)
 	mux.HandleFunc("/api/v1/user", a.user)
 	mux.HandleFunc("/api/v1/info", a.info)
+	mux.HandleFunc("/api/v1/palettes", a.palettes)
 	mux.HandleFunc("/api/v1/prompt", a.prompt)
 	mux.HandleFunc("GET /api/v1/items", a.listItems)
 	mux.HandleFunc("POST /api/v1/items", a.createItem)
@@ -1187,6 +1188,343 @@ const vectoriseMaxColourLayers = 16
 // favour of a plain polygon segment.
 const vectoriseMaxFitError = 1.5
 
+// palette is a fixed set of colours drawn from a felt-tip marker pack. When a
+// palette is supplied at the /api/v1/process endpoint the traced SVG uses only
+// these colours: each foreground pixel is mapped to its nearest palette colour,
+// producing a result that looks as though it were coloured in with the named
+// pens rather than quantised from the bitmap.
+//
+// The colour lists are derived from each brand's published product packaging
+// (the marker/pen packs they sell as 4/6/8/12/24-packs). Hex values are
+// approximate matches to the printed caps. Anyone refining these against the
+// current product packaging should only need to edit allPalettes below.
+type palette struct {
+	ID      string         `json:"id"`
+	Brand   string         `json:"brand"`
+	Name    string         `json:"name"`
+	Colours []paletteColour `json:"colours"`
+}
+
+// paletteColour is one named colour in a palette; hex is in #rrggbb form so it
+// drops into a CSS colour picker or the SVG fill attribute unchanged.
+type paletteColour struct {
+	Name string `json:"name"`
+	Hex  string `json:"hex"`
+}
+
+// allPalettes is the catalogue offered by the /api/v1/palettes endpoint:
+// 4 / 6 / 8 / 12 / 24-pack felt-tip sets from Berol, Crayola, Sharpie and
+// Staedtler.
+var allPalettes = []palette{
+	// Berol (Paper Mate) ColourFine — classic classroom fibre-tip range.
+	// Colour names follow Berol's product packaging.
+	berolPalette("berol-4", 4,
+		paletteColour{"Black", "#1A1A1A"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Green", "#2BA64A"},
+	),
+	berolPalette("berol-6", 6,
+		paletteColour{"Black", "#1A1A1A"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Brown", "#7B4636"},
+	),
+	berolPalette("berol-8", 8,
+		paletteColour{"Black", "#1A1A1A"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Brown", "#7B4636"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Purple", "#7E3F98"},
+	),
+	berolPalette("berol-12", 12,
+		paletteColour{"Black", "#1A1A1A"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Light Green", "#84C441"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Pink", "#F3A0B7"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Brown", "#7B4636"},
+		paletteColour{"Grey", "#909090"},
+		paletteColour{"Lime", "#C7E54B"},
+	),
+	berolPalette("berol-24", 24,
+		paletteColour{"Black", "#1A1A1A"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Light Blue", "#5DADE2"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Crimson", "#A50021"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Light Green", "#84C441"},
+		paletteColour{"Dark Green", "#00633F"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Violet", "#A067B3"},
+		paletteColour{"Pink", "#F3A0B7"},
+		paletteColour{"Hot Pink", "#E8579A"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Gold", "#E5A823"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Burnt Orange", "#D2691E"},
+		paletteColour{"Brown", "#7B4636"},
+		paletteColour{"Dark Brown", "#4A2C1A"},
+		paletteColour{"Grey", "#909090"},
+		paletteColour{"Dark Grey", "#5A5A5A"},
+		paletteColour{"Lime", "#C7E54B"},
+		paletteColour{"Sky Blue", "#B5DCE6"},
+		paletteColour{"Peach", "#F8C79B"},
+		paletteColour{"Beige", "#E6D2A8"},
+	),
+	// Crayola — published standard marker / felt-tip colours.
+	crayolaPalette("crayola-4", 4,
+		paletteColour{"Red", "#ED0A3F"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Blue", "#0066CC"},
+		paletteColour{"Green", "#01A638"},
+	),
+	crayolaPalette("crayola-6", 6,
+		paletteColour{"Red", "#ED0A3F"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Green", "#01A638"},
+		paletteColour{"Blue", "#0066CC"},
+		paletteColour{"Violet (Purple)", "#8359A2"},
+	),
+	crayolaPalette("crayola-8", 8,
+		paletteColour{"Black", "#000000"},
+		paletteColour{"Red", "#ED0A3F"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Green", "#01A638"},
+		paletteColour{"Blue", "#0066CC"},
+		paletteColour{"Violet (Purple)", "#8359A2"},
+		paletteColour{"Brown", "#AF593E"},
+	),
+	crayolaPalette("crayola-12", 12,
+		paletteColour{"Black", "#000000"},
+		paletteColour{"Blue", "#0066CC"},
+		paletteColour{"Green", "#01A638"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Red", "#ED0A3F"},
+		paletteColour{"Pink", "#F6B0BE"},
+		paletteColour{"Violet (Purple)", "#8359A2"},
+		paletteColour{"Brown", "#AF593E"},
+		paletteColour{"Sky Blue", "#76D6FF"},
+		paletteColour{"Lime", "#C5E384"},
+		paletteColour{"White", "#FFFFFF"},
+	),
+	crayolaPalette("crayola-24", 24,
+		paletteColour{"Red", "#ED0A3F"},
+		paletteColour{"Red-Violet", "#C0448F"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Yellow-Green", "#C5E384"},
+		paletteColour{"Green", "#01A638"},
+		paletteColour{"Blue-Green", "#1999B3"},
+		paletteColour{"Blue", "#0066CC"},
+		paletteColour{"Blue-Violet", "#6456B7"},
+		paletteColour{"Violet (Purple)", "#8359A2"},
+		paletteColour{"Pink", "#F6B0BE"},
+		paletteColour{"Brown", "#AF593E"},
+		paletteColour{"Black", "#000000"},
+		paletteColour{"White", "#FFFFFF"},
+		paletteColour{"Sky Blue", "#76D6FF"},
+		paletteColour{"Magenta", "#CD6298"},
+		paletteColour{"Lime", "#C7E54B"},
+		paletteColour{"Turquoise", "#43BFC7"},
+		paletteColour{"Tan", "#D6A867"},
+		paletteColour{"Peach", "#F8C79B"},
+		paletteColour{"Maroon", "#874B53"},
+		paletteColour{"Forest Green", "#5A8F3A"},
+		paletteColour{"Navy Blue", "#364A5C"},
+		paletteColour{"Burnt Sienna", "#E97451"},
+	),
+	// Sharpie Fine Point — 41-colour published palette; subsets below pick the
+	// canonical pack colours.
+	sharpiePalette("sharpie-4", 4,
+		paletteColour{"Black", "#000000"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Green", "#2BA64A"},
+	),
+	sharpiePalette("sharpie-6", 6,
+		paletteColour{"Black", "#000000"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+	),
+	sharpiePalette("sharpie-8", 8,
+		paletteColour{"Black", "#000000"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Pink", "#F3A0B7"},
+	),
+	sharpiePalette("sharpie-12", 12,
+		paletteColour{"Black", "#000000"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Lime", "#C7E54B"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Magenta", "#CD6298"},
+		paletteColour{"Pink", "#F3A0B7"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Brown", "#7B4636"},
+		paletteColour{"Aqua", "#43BFC7"},
+	),
+	sharpiePalette("sharpie-24", 24,
+		paletteColour{"Black", "#000000"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Turquoise", "#43BFC7"},
+		paletteColour{"Sky Blue", "#B5DCE6"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Lime", "#C7E54B"},
+		paletteColour{"Mint", "#84D4A0"},
+		paletteColour{"Clover", "#3F8B47"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Coral", "#FF7F50"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Magenta", "#CD6298"},
+		paletteColour{"Pink", "#F3A0B7"},
+		paletteColour{"Hot Pink", "#E8579A"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Plum", "#852C70"},
+		paletteColour{"Navy", "#1B2E5C"},
+		paletteColour{"Brown", "#7B4636"},
+		paletteColour{"Grey", "#909090"},
+		paletteColour{"Slate Grey", "#6E7B8B"},
+		paletteColour{"Indigo", "#3F4F9F"},
+		paletteColour{"Berry", "#A12465"},
+		paletteColour{"Mocha", "#8C6F5C"},
+	),
+	// Staedtler Noris club — broad-tip fibre pen classroom sets.
+	staedtlerPalette("staedtler-4", 4,
+		paletteColour{"Black", "#1F1F1F"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Green", "#2BA64A"},
+	),
+	staedtlerPalette("staedtler-6", 6,
+		paletteColour{"Black", "#1F1F1F"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Brown", "#7B4636"},
+	),
+	staedtlerPalette("staedtler-8", 8,
+		paletteColour{"Black", "#1F1F1F"},
+		paletteColour{"Blue", "#1B53C4"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Brown", "#7B4636"},
+	),
+	staedtlerPalette("staedtler-12", 12,
+		paletteColour{"Black", "#1F1F1F"},
+		paletteColour{"Dark Blue", "#0E2E73"},
+		paletteColour{"Light Blue", "#5DADE2"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Dark Green", "#00633F"},
+		paletteColour{"Light Green", "#84C441"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Pink", "#F3A0B7"},
+		paletteColour{"Brown", "#7B4636"},
+		paletteColour{"Grey", "#909090"},
+	),
+	staedtlerPalette("staedtler-24", 24,
+		paletteColour{"Black", "#1F1F1F"},
+		paletteColour{"Dark Blue", "#0E2E73"},
+		paletteColour{"Mid Blue", "#1B53C4"},
+		paletteColour{"Light Blue", "#5DADE2"},
+		paletteColour{"Sky Blue", "#B5DCE6"},
+		paletteColour{"Dark Red", "#A50021"},
+		paletteColour{"Red", "#D6262C"},
+		paletteColour{"Pink", "#F3A0B7"},
+		paletteColour{"Dark Green", "#00633F"},
+		paletteColour{"Green", "#2BA64A"},
+		paletteColour{"Light Green", "#84C441"},
+		paletteColour{"Lime", "#C7E54B"},
+		paletteColour{"Yellow", "#FBE870"},
+		paletteColour{"Gold", "#E5A823"},
+		paletteColour{"Orange", "#FF8833"},
+		paletteColour{"Burnt Orange", "#D2691E"},
+		paletteColour{"Purple", "#7E3F98"},
+		paletteColour{"Violet", "#A067B3"},
+		paletteColour{"Magenta", "#CD6298"},
+		paletteColour{"Brown", "#7B4636"},
+		paletteColour{"Dark Brown", "#4A2C1A"},
+		paletteColour{"Beige", "#E6D2A8"},
+		paletteColour{"Grey", "#909090"},
+		paletteColour{"Dark Grey", "#5A5A5A"},
+	),
+}
+
+// berolPalette, crayolaPalette, sharpiePalette and staedtlerPalette are tiny
+// helpers that stamp the brand and human-friendly name on a pack-shaped entry.
+func berolPalette(id string, size int, cols ...paletteColour) palette {
+	return palette{ID: id, Brand: "Berol", Name: fmt.Sprintf("ColourFine %d-pack", size), Colours: cols}
+}
+func crayolaPalette(id string, size int, cols ...paletteColour) palette {
+	return palette{ID: id, Brand: "Crayola", Name: fmt.Sprintf("Classic %d-pack", size), Colours: cols}
+}
+func sharpiePalette(id string, size int, cols ...paletteColour) palette {
+	return palette{ID: id, Brand: "Sharpie", Name: fmt.Sprintf("Fine Point %d-pack", size), Colours: cols}
+}
+func staedtlerPalette(id string, size int, cols ...paletteColour) palette {
+	return palette{ID: id, Brand: "Staedtler", Name: fmt.Sprintf("Noris club %d-pack", size), Colours: cols}
+}
+
+// findPalette looks up a palette by ID and returns it together with an ok flag
+// so the HTTP handler can validate user input.
+func findPalette(id string) (palette, bool) {
+	for _, p := range allPalettes {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return palette{}, false
+}
+
+// parseHexColour turns "#rrggbb" into the (r, g, b) tuple the colour layer
+// machinery uses. Returns ok=false on badly formed input.
+func parseHexColour(s string) (uint8, uint8, uint8, bool) {
+	if len(s) != 7 || s[0] != '#' {
+		return 0, 0, 0, false
+	}
+	parse := func(a, b byte) (uint8, bool) {
+		v, err := strconv.ParseUint(string([]byte{a, b}), 16, 8)
+		return uint8(v), err == nil
+	}
+	r, ok1 := parse(s[1], s[2])
+	g, ok2 := parse(s[3], s[4])
+	b, ok3 := parse(s[5], s[6])
+	if !ok1 || !ok2 || !ok3 {
+		return 0, 0, 0, false
+	}
+	return r, g, b, true
+}
+
 // fpoint is a floating-point grid point used while fitting curves.
 type fpoint struct{ x, y float64 }
 
@@ -1205,7 +1543,7 @@ func isSVGDocument(img []byte) bool {
 // GIF) are accepted; an image that is already vector (an SVG document) is
 // passed through unchanged. The returned document has a transparent background
 // with the colour layers on top, sized to the source image.
-func vectoriseBitmap(imgBytes []byte) ([]byte, error) {
+func vectoriseBitmap(imgBytes []byte, paletteID string) ([]byte, error) {
 	if isSVGDocument(imgBytes) {
 		return imgBytes, nil
 	}
@@ -1217,6 +1555,13 @@ func vectoriseBitmap(imgBytes []byte) ([]byte, error) {
 
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
+	if paletteID != "" {
+		pal, ok := findPalette(paletteID)
+		if !ok {
+			return nil, fmt.Errorf("unknown palette %q", paletteID)
+		}
+		return colourLoopsToSVG(paletteLayers(img, pal), w, h), nil
+	}
 	return colourLoopsToSVG(colourLayers(img), w, h), nil
 }
 
@@ -1316,6 +1661,63 @@ func colourLayers(img image.Image) []colourLayer {
 	}
 
 	return layers
+}
+
+// paletteLayers is colourLayers' deterministic counterpart: each layer is one
+// fixed palette colour, and every foreground pixel is assigned to the closest
+// palette colour by RGB distance (the same metric colourLayers uses for its
+// nearestLayer merge). The result is an SVG that uses only the named pens'
+// colours, so it looks as though it were drawn with the marker set.
+func paletteLayers(img image.Image, pal palette) []colourLayer {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+
+	type rgb struct{ r, g, b uint8 }
+	layers := make([]rgb, len(pal.Colours))
+	for i, c := range pal.Colours {
+		r, g, b2, ok := parseHexColour(c.Hex)
+		if !ok {
+			// Defensive fallback: a malformed hex should never reach here because
+			// the palette dataset is constant, but skip rather than crash.
+			r, g, b2 = 0, 0, 0
+		}
+		layers[i] = rgb{r, g, b2}
+	}
+	if len(layers) == 0 {
+		return nil
+	}
+
+	out := make([]colourLayer, len(layers))
+	for i := range out {
+		out[i] = colourLayer{
+			r:    layers[i].r,
+			g:    layers[i].g,
+			b:    layers[i].b,
+			mask: make([]bool, w*h),
+		}
+	}
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, bl, a := img.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			p := vectorPixel{uint8(r >> 8), uint8(g >> 8), uint8(bl >> 8), uint8(a >> 8)}
+			if isBackgroundColour(p) {
+				continue
+			}
+			best, bestDist := 0, int(^uint(0)>>1)
+			for i, l := range layers {
+				dr := int(p.r) - int(l.r)
+				dg := int(p.g) - int(l.g)
+				db := int(p.b) - int(l.b)
+				if d := dr*dr + dg*dg + db*db; d < bestDist {
+					best, bestDist = i, d
+				}
+			}
+			out[best].mask[y*w+x] = true
+			out[best].count++
+		}
+	}
+	return out
 }
 
 // isBackgroundColour reports whether a pixel is part of the untraced

@@ -255,6 +255,7 @@ func TestServeAllRoutes(t *testing.T) {
 		{"/api/v1/user", http.StatusOK, "application/json", `"auth_type"`},
 		{"/api/v1/health", http.StatusOK, "application/json", `"ok"`},
 		{"/api/v1/prompt", http.StatusOK, "application/json", `"prompt"`},
+		{"/api/v1/palettes", http.StatusOK, "application/json", `"brand"`},
 		{"/docs/api", http.StatusOK, "text/html", "swagger-ui"},
 		{"/docs/swagger.json", http.StatusOK, "application/json", `"swagger"`},
 		{"/docs/swagger-ui/swagger-ui.css", http.StatusOK, "text/css", "swagger-ui"},
@@ -1807,7 +1808,7 @@ func TestVectoriseBitmapColourLayers(t *testing.T) {
 		return color.RGBA{255, 255, 255, 255}
 	})
 
-	svg, err := vectoriseBitmap(src)
+	svg, err := vectoriseBitmap(src, "")
 	if err != nil {
 		t.Fatalf("vectoriseBitmap returned error: %v", err)
 	}
@@ -1829,7 +1830,7 @@ func TestVectoriseBitmapColourLayers(t *testing.T) {
 func TestVectoriseBitmapProducesSVG(t *testing.T) {
 	src := pngOf(4, 4, func(x, y int) bool { return x >= 1 && x <= 2 && y >= 1 && y <= 2 })
 
-	svg, err := vectoriseBitmap(src)
+	svg, err := vectoriseBitmap(src, "")
 	if err != nil {
 		t.Fatalf("vectoriseBitmap returned error: %v", err)
 	}
@@ -1849,7 +1850,7 @@ func TestVectoriseBitmapProducesSVG(t *testing.T) {
 
 func TestVectoriseBitmapPassesThroughSVG(t *testing.T) {
 	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><path d="M0 0"/></svg>`)
-	got, err := vectoriseBitmap(svg)
+	got, err := vectoriseBitmap(svg, "")
 	if err != nil {
 		t.Fatalf("vectoriseBitmap returned error: %v", err)
 	}
@@ -1859,8 +1860,53 @@ func TestVectoriseBitmapPassesThroughSVG(t *testing.T) {
 }
 
 func TestVectoriseBitmapRejectsUndecodableInput(t *testing.T) {
-	if _, err := vectoriseBitmap([]byte("this is not an image")); err == nil {
+	if _, err := vectoriseBitmap([]byte("this is not an image"), ""); err == nil {
 		t.Errorf("expected an error for undecodable input, got none")
+	}
+}
+
+func TestVectoriseBitmapUsesPaletteColours(t *testing.T) {
+	// Synthetic 8x8 PNG: two solid colour blocks whose nearest palette matches
+	// are Crayola red (#ED0A3F) and Crayola blue (#0066CC), plus a white
+	// background that should remain untraced.
+	w, h := 8, 8
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			switch {
+			case x < 4 && y < 4:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xEE, G: 0x10, B: 0x40, A: 0xFF})
+			case x >= 4 && y >= 4:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0x00, G: 0x66, B: 0xCC, A: 0xFF})
+			default:
+				img.SetNRGBA(x, y, color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode test PNG: %v", err)
+	}
+
+	got, err := vectoriseBitmap(buf.Bytes(), "crayola-12")
+	if err != nil {
+		t.Fatalf("vectoriseBitmap with palette returned error: %v", err)
+	}
+	svg := string(got)
+	if !strings.Contains(svg, "#ed0a3f") {
+		t.Errorf("palette SVG is missing Crayola red (#ed0a3f): %s", svg)
+	}
+	if !strings.Contains(svg, "#0066cc") {
+		t.Errorf("palette SVG is missing Crayola blue (#0066cc): %s", svg)
+	}
+}
+
+func TestFindPaletteRejectsUnknownID(t *testing.T) {
+	if _, ok := findPalette("does-not-exist"); ok {
+		t.Errorf("findPalette should report ok=false for an unknown ID")
+	}
+	if _, ok := findPalette("crayola-12"); !ok {
+		t.Errorf("findPalette failed to return the well-known crayola-12 entry")
 	}
 }
 

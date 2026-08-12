@@ -64,6 +64,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const processLabel = document.getElementById('process-label');
   const promptText = document.getElementById('prompt-text');
   const vectoriseCheck = document.getElementById('chk-vectorise');
+  const paletteCheck = document.getElementById('chk-palette');
+  const paletteCollapse = document.getElementById('palette-collapse');
+  const paletteSelect = document.getElementById('sel-palette');
+  const paletteSwatch = document.getElementById('palette-swatch');
+
+  let palettes = [];
 
   const resultCard = document.getElementById('result-card');
   const resultImage = document.getElementById('result-image');
@@ -125,6 +131,65 @@ document.addEventListener('DOMContentLoaded', () => {
       })
       .catch(() => {});
   }
+
+  // Group palettes by brand for the dropdown so it's easy to find the entry a
+  // user is after; the option text reads "Brand – N-pack".
+  function paletteOptionLabel(p) {
+    return p.brand + ' – ' + p.name.replace(/.*?(\d+-pack)/, '$1');
+  }
+
+  function renderPaletteSwatch(p) {
+    if (!p) {
+      paletteSwatch.textContent = '';
+      return;
+    }
+    const dots = p.colours.map((c) => '<span style="display:inline-block;width:1rem;height:1rem;border-radius:50%;background:' + c.hex + ';border:1px solid rgba(0,0,0,.2);margin-right:.25rem;"></span>').join('');
+    paletteSwatch.innerHTML = '<div class="d-flex flex-wrap align-items-center gap-1 mt-1">' + dots + '</div>' +
+      '<div class="small text-secondary">' + p.colours.map((c) => c.name + ' (' + c.hex + ')').join(' · ') + '</div>';
+  }
+
+  function loadPalettes() {
+    fetchJSON('api/v1/palettes')
+      .then((data) => {
+        palettes = Array.isArray(data.palettes) ? data.palettes : [];
+        const groups = {};
+        for (const p of palettes) {
+          (groups[p.brand] = groups[p.brand] || []).push(p);
+        }
+        const frag = document.createDocumentFragment();
+        for (const brand of Object.keys(groups).sort()) {
+          const og = document.createElement('optgroup');
+          og.label = brand;
+          groups[brand].forEach((p) => {
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = paletteOptionLabel(p);
+            og.appendChild(opt);
+          });
+          frag.appendChild(og);
+        }
+        paletteSelect.innerHTML = '';
+        paletteSelect.appendChild(frag);
+        renderPaletteSwatch(palettes[0]);
+      })
+      .catch(() => {
+        paletteSelect.innerHTML = '';
+        paletteSwatch.textContent = 'Palette list unavailable.';
+      });
+  }
+
+  paletteCheck.addEventListener('change', () => {
+    const shown = paletteCheck.checked;
+    paletteCollapse.classList.toggle('show', shown);
+    if (shown) {
+      vectoriseCheck.checked = true;
+    }
+  });
+
+  paletteSelect.addEventListener('change', () => {
+    const p = palettes.find((x) => x.id === paletteSelect.value);
+    renderPaletteSwatch(p);
+  });
 
   function loadCredits() {
     fetchJSON('api/v1/credits')
@@ -590,6 +655,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (prompt) form.append('prompt', prompt);
       if (lastOutputFile) form.append('output', lastOutputFile);
       if (vectoriseCheck.checked) form.append('vectorise', 'true');
+      if (paletteCheck.checked) form.append('palette', paletteSelect.value);
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
       lastOutputFile = data.filename;
       resultImage.src =
@@ -633,6 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   checkConnection();
   loadPrompt();
+  loadPalettes();
   loadCredits();
   loadInfo();
 });

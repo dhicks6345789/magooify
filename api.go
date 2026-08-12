@@ -125,6 +125,11 @@ type ProcessImageRequest struct {
 	// transparent background. Models that already return SVG are passed
 	// through unchanged.
 	Vectorise bool `json:"vectorise" example:"false"`
+	// Palette restricts the vectorised SVG to the named palette (one of the
+	// IDs returned by /api/v1/palettes). Implies Vectorise. Each foreground
+	// pixel is mapped to its nearest palette colour, so the SVG looks like it
+	// was coloured in with the named pen pack.
+	Palette string `json:"palette,omitempty" example:"crayola-12"`
 }
 
 // ProcessImageResponse describes the outcome of processing an image. Cost is
@@ -761,6 +766,20 @@ func (a *api) prompt(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"prompt": a.processPrompt()})
 }
 
+// palettes returns the catalogue of fixed colour palettes the vectoriser can
+// confine its output to (felt-tip pen packs from Berol, Crayola, Sharpie and
+// Staedtler). The frontend fetches these on page load to populate the "Use a
+// limited colour palette" picker.
+// @Summary List Colour Palettes
+// @Description Returns the fixed colour palettes (Berol, Crayola, Sharpie, Staedtler felt-tip packs) available to the vectoriser.
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/palettes [get]
+func (a *api) palettes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"palettes": allPalettes})
+}
+
 // listItems returns all stored items.
 // @Summary List Items
 // @Description Returns all stored items.
@@ -820,6 +839,7 @@ type imagePayload struct {
 	prompt      string
 	output      string
 	vectorise   bool
+	palette     string
 }
 
 // processImage accepts an image (multipart upload or JSON base64/data URL),
@@ -833,6 +853,7 @@ type imagePayload struct {
 // @Param prompt formData string false "Prompt to send with the image; defaults to the configured prompt"
 // @Param output formData string false "Optional filename to write the processed image to, replacing any existing file with that name"
 // @Param vectorise formData bool false "Trace the processed image into an SVG document (true/1/on/yes)"
+// @Param palette formData string false "Restrict the vectorised SVG to this palette ID (returned by /api/v1/palettes); implies vectorise"
 // @Success 200 {object} ProcessImageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
@@ -856,6 +877,13 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if pl.palette != "" {
+		if _, ok := findPalette(pl.palette); !ok {
+			a.jsonError(w, http.StatusBadRequest, "Unknown palette: "+pl.palette)
+			return
+		}
+	}
+
 	processed, cost, err := a.processWithOpenRouter(pl.img, pl.contentType, pl.prompt)
 	if err != nil {
 		code := http.StatusBadGateway
@@ -866,8 +894,8 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if pl.vectorise {
-		if vectorised, verr := vectoriseBitmap(processed); verr == nil {
+	if pl.vectorise || pl.palette != "" {
+		if vectorised, verr := vectoriseBitmap(processed, pl.palette); verr == nil {
 			processed = vectorised
 		} else {
 			a.jsonError(w, http.StatusBadRequest, "Cannot vectorise the processed image: "+verr.Error())
@@ -920,6 +948,7 @@ func readImagePayload(r *http.Request) (*imagePayload, error) {
 			prompt:    req.Prompt,
 			output:    req.Output,
 			vectorise: req.Vectorise,
+			palette:   req.Palette,
 		}, nil
 	}
 
@@ -946,6 +975,7 @@ func readImagePayload(r *http.Request) (*imagePayload, error) {
 		prompt:      r.FormValue("prompt"),
 		output:      r.FormValue("output"),
 		vectorise:   parseBoolValue(r.FormValue("vectorise")),
+		palette:     r.FormValue("palette"),
 	}, nil
 }
 
