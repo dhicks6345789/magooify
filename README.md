@@ -1,24 +1,20 @@
+![Magooify logo](ui/logo.svg)
 # Magooify
 
-![Magooify logo](ui/logo.svg)
+Turn your quick, roughly-sketched cartoons into clean, scaleable images with smooth lines and consistent colours.
 
-Magooify is a self-hostable Go application that bundles application logic, an embedded Bootstrap web user interface and interactive OpenAPI documentation into a single executable.
+With a web-based interface and a self-contained, single-executable backend, this application is self-hostable on pretty much any platform, meaning you can control exactly where your content ends up.
 
-The web interface lets you take a photo with your device camera or upload (or drag and drop) an image file. Magooify sends the image to an image-capable model on OpenRouter for processing, then saves the processed version of the image to a folder on disk.
+Designed to work with an AI service for image processing. Can integrate with an authenticating proxy server (Cloudflare Tunnels, Pangolin, etc) to support multiple users - perfect for schools.
 
 ## Features
 
-- **Image Capture**: Take photos directly with your device camera (via `getUserMedia`) or upload (or drag and drop) image files from your machine.
-- **OpenRouter Processing**: Captured images are sent to an image model on OpenRouter, which returns the processed version of the image.
-- **Vectorise to SVG**: Optionally trace the processed image into a resolution-independent SVG document, ideal for logos, diagrams and clean black-and-white artwork that needs to scale without pixelation.
+- **Image Capture**: Take photos from your device (phone or tablet), scan from a desktop visualiser, or simply upload an image.
+- **AI Image Processing**: Images are processed to smooth lines, create consistent colours and fill shapes. The prompt used for processing is customisable, and the model used can be selected.
+- **Vectorise to SVG**: Optionally trace the processed image into a resolution-independent SVG image.
 - **File System Storage**: The processed image is saved to a configurable output directory.
-- **Single Executable Deployment**: Uses Go's `embed` package to bundle the frontend HTML / CSS / JavaScript assets, documentation and OpenAPI specifications into a single binary.
-- **Offline Operation**: Designed to be able to operate without internet access; all UI libraries and documentation resources are served locally. (Note: processing an image needs internet access to reach OpenRouter.)
-- **Works on Desktop and Server**:
-  - **Desktop Mode**: Ideal for local home desktop use on pretty much any platform ([Windows](https://www.microsoft.com/windows/) / [Windows Server](https://www.microsoft.com/windows-server), [MacOS](https://en.wikipedia.org/wiki/MacOS), and [Linux](https://en.wikipedia.org/wiki/Linux), including both the [Raspberry Pi](https://www.raspberrypi.com/) (and other single-board computers) and [ChromeOS](https://chromeos.google/intl/en_uk/products/chromeos-flex/) ([Crostini](https://chromeos.dev/en/linux))). Running the executable on your desktop machine should give you a localhost-only server and automatically launch your default web browser to display the user interface.
-  - **Server Mode**: Suitable for multi-user deployment behind authenticating reverse proxies ([Pangolin](https://pangolin.net/), [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/), [Authelia](https://www.authelia.com/), [Tailscale](https://tailscale.com/), [etc](https://github.com/anderspitman/awesome-tunneling)). Authenticates users via incoming proxy headers (`X-Forwarded-User`, `Remote-User`, `Pangolin-User`, etc.). As a single, statically linked Go binary with no external dependencies, it can be run inside a very minimal (`scratch`) container environment.
-- **Built for use by humans and AI agents**: With built-in documentation and Swagger UI, documentation should be easy to understand for both humans and AI agents.
-- **Built for extending by humans and AI agents**: Point an AI coding agent at AGENTS.md (or read it yourself) and use this project as a basis for your own app, the project structure is kept deliberately simple.
+- **Designed For Schools**: Can integrate with your authentication provider (Google, Microsoft, etc), cloud storage (Google Drive, OneDrive, etc) and filtered / budget-controlled AI API router, making it suitable for educational establishment looking to limit AI tool usage. It can even colour-match the felt-tip pens you use!
+- **Easy To Customise**: Built in Go with an AI agent, adding or changing features should be a simple case of describing what you want done.
 
 ---
 
