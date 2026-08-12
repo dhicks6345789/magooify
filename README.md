@@ -1,4 +1,4 @@
-# <img src="./ui/logo.svg" width="30" valign="middle"> Magooify
+# <img src="./ui/logo.svg" width="50" valign="middle"> Magooify
 
 Turn your quick, roughly-sketched cartoons into clean, scaleable images with smooth lines and consistent colours.
 
