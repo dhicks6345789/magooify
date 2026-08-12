@@ -107,6 +107,10 @@
       <p><a href="https://github.com/dhicks6345789/magooify" target="_blank" class="github-link">View on GitHub</a> &middot; <a href="docs/api.html" target="_blank" class="github-link">API Documentation</a></p>
     </header>
 
+    <div class="docs-section">
+      {{ .Content }}
+    </div>
+
     <h2 class="section-title">📦 Download Executables</h2>
     <div class="downloads-grid">
       {{ range site.Data.downloads.downloads }}
@@ -120,11 +124,6 @@
         <a href="{{ .filename }}" class="btn-download" download>Download</a>
       </div>
       {{ end }}
-    </div>
-
-    <h2 class="section-title">📖 Project Documentation</h2>
-    <div class="docs-section">
-      {{ .Content }}
     </div>
   </div>
 </body>
