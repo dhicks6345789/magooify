@@ -63,6 +63,43 @@ document.addEventListener('DOMContentLoaded', () => {
   const processSpinner = document.getElementById('process-spinner');
   const processLabel = document.getElementById('process-label');
   const promptText = document.getElementById('prompt-text');
+
+  // basePrompt holds the prompt returned by /api/v1/prompt (the configurable
+  // default = PROMPT.md or -prompt-file). It is the starting point the
+  // palette-specific line is appended to, mirroring applyPalettePrompt in
+  // api.go so the textarea always shows what the request will actually send.
+  let basePrompt = '';
+
+  // palettePromptRe matches the same "Limit the colour palette to N colours,
+  // rendering any colours found to their nearest-fit colour." sentence the
+  // backend strips before adding the palette-version of the line.
+  const palettePromptRe = /\s*Limit the colour palette to[^.]*\.\s*/i;
+
+  function composePromptWithPalette(base, p) {
+    if (!base) {
+      return p ? palettePromptLine(p) : '';
+    }
+    if (!p) {
+      return base;
+    }
+    const trimmed = base.replace(palettePromptRe, ' ').replace(/\s+$/, '');
+    const sep = trimmed && !trimmed.endsWith('.') ? '. ' : ' ';
+    return trimmed + sep + palettePromptLine(p);
+  }
+
+  function palettePromptLine(p) {
+    const hexes = p.colours.map((c) => c.hex.toLowerCase()).join(', ');
+    return 'Limit the colour palette to white plus these ' +
+      p.colours.length + ' colours: ' + hexes +
+      ', rendering any colours found to their nearest-fit colour.';
+  }
+
+  function refreshPromptPreview() {
+    const current = paletteCheck.checked
+      ? palettes.find((x) => x.id === paletteSelect.value)
+      : null;
+    promptText.value = composePromptWithPalette(basePrompt, current);
+  }
   const vectoriseCheck = document.getElementById('chk-vectorise');
   const paletteCheck = document.getElementById('chk-palette');
   const paletteCollapse = document.getElementById('palette-collapse');
@@ -127,7 +164,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function loadPrompt() {
     fetchJSON('api/v1/prompt')
       .then((data) => {
-        promptText.value = data.prompt || '';
+        basePrompt = (data.prompt || '').trim();
+        refreshPromptPreview();
       })
       .catch(() => {});
   }
@@ -176,6 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
         paletteSelect.appendChild(frag);
         const def = palettes.find((p) => p.id === defaultPaletteID) || palettes[0];
         renderPaletteSwatch(def);
+        refreshPromptPreview();
       })
       .catch(() => {
         paletteSelect.innerHTML = '';
@@ -189,11 +228,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (shown) {
       vectoriseCheck.checked = true;
     }
+    refreshPromptPreview();
   });
 
   paletteSelect.addEventListener('change', () => {
     const p = palettes.find((x) => x.id === paletteSelect.value);
     renderPaletteSwatch(p);
+    refreshPromptPreview();
   });
 
   function loadCredits() {
