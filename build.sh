@@ -8,6 +8,7 @@ OUT_DIR="dist"
 BIN="magooify"
 HUGO_SITE="hugo"
 LOGO_SRC="ui/logo.svg"
+UI_DIR="ui"
 
 # Human-readable file size, portable across Linux/macOS.
 human_size() {
@@ -25,8 +26,14 @@ clean_logo() {
   go run . -clean-logo "$LOGO_SRC"
 }
 
+favicons() {
+  echo "==> Generating favicons from logo.svg..."
+  go run . -gen-favicons "$UI_DIR"
+}
+
 build_host() {
   clean_logo
+  favicons
   echo "==> Building Go executable (host platform)..."
   go build -o "$BIN" main.go api.go
   echo "==> Built: ./$BIN"
@@ -45,6 +52,7 @@ build_target() {
 
 build_all() {
   clean_logo
+  favicons
   mkdir -p "$OUT_DIR"
   echo "==> Compiling for all target platforms..."
   build_target linux amd64 "" "$OUT_DIR/magooify-linux-amd64"
@@ -201,6 +209,7 @@ usage() {
   echo "  build         Build the Go executable for the current platform"
   echo "  build-all     Build executables for all supported platforms into ./dist/"
   echo "  logo          Strip Inkscape-specific parts from ui/logo.svg"
+  echo "  favicons      Generate favicon files from ui/logo.svg"
   echo "  api-docs      Generate docs/api.html from the OpenAPI specification"
   echo "  index         Generate index.html from README.md with Hugo"
   echo "  dist          Stage dist/, docs/ and index.html into DEST_DIR"
@@ -215,6 +224,7 @@ case "${1:-build}" in
   build) build_host ;;
   build-all) build_all ;;
   logo) clean_logo ;;
+  favicons) favicons ;;
   api-docs) api_docs ;;
   index) index ;;
   dist) dist "${2:-}" ;;

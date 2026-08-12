@@ -3,13 +3,15 @@ package main
 import (
 	"bytes"
 	"embed"
+	"encoding/binary"
 	"encoding/xml"
 	"flag"
 	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/color"
+	"image/png"
 	"io/fs"
 	"log"
 	"math"
@@ -19,8 +21,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -43,6 +48,7 @@ func registerMimeTypes() {
 	mime.AddExtensionType(".js", "text/javascript; charset=utf-8")
 	mime.AddExtensionType(".mjs", "text/javascript; charset=utf-8")
 	mime.AddExtensionType(".json", "application/json")
+	mime.AddExtensionType(".webmanifest", "application/manifest+json")
 	mime.AddExtensionType(".map", "application/json")
 	mime.AddExtensionType(".svg", "image/svg+xml")
 	mime.AddExtensionType(".png", "image/png")
@@ -158,6 +164,649 @@ func splitStyleProps(style string) []styleProp {
 	return props
 }
 
+// faviconCanvasW and faviconCanvasH are the dimensions of the logo's SVG
+// viewBox; favicon renders fit the logo inside a square while keeping the
+// original 5:6 aspect ratio, matching the browser's default SVG scaling.
+const (
+	faviconCanvasW = 250.0
+	faviconCanvasH = 300.0
+)
+
+// faviconShape is one filled path of the logo, flattened into closed polygons
+// ready for point-in-polygon rasterisation.
+type faviconShape struct {
+	color    color.NRGBA
+	polygons [][]fpoint
+}
+
+// generateFavicons renders the UI logo into a set of favicon files for a
+// range of platforms and writes them into dir (the embedded UI directory):
+// favicon.ico (16/32/48), favicon-{16,32,48}x{n}.png, apple-touch-icon.png,
+// favicon.svg and site.webmanifest.
+func generateFavicons(dir string) error {
+	logoPath := filepath.Join(dir, "logo.svg")
+	data, err := os.ReadFile(logoPath)
+	if err != nil {
+		return err
+	}
+
+	shapes, err := parseFaviconShapes(data)
+	if err != nil {
+		return err
+	}
+
+	writeFile := func(name string, content []byte) error {
+		return os.WriteFile(filepath.Join(dir, name), content, 0o644)
+	}
+
+	var icoPNGs [][]byte
+	var icoSizes []int
+	for _, size := range []int{16, 32, 48, 180} {
+		pngBytes, err := renderFaviconPNG(shapes, size)
+		if err != nil {
+			return err
+		}
+		if size == 180 {
+			if err := writeFile("apple-touch-icon.png", pngBytes); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := writeFile(fmt.Sprintf("favicon-%dx%d.png", size, size), pngBytes); err != nil {
+			return err
+		}
+		icoPNGs = append(icoPNGs, pngBytes)
+		icoSizes = append(icoSizes, size)
+	}
+
+	ico, err := encodeICO(icoPNGs, icoSizes)
+	if err != nil {
+		return err
+	}
+	if err := writeFile("favicon.ico", ico); err != nil {
+		return err
+	}
+
+	// The SVG favicon is simply the cleaned logo itself.
+	if err := writeFile("favicon.svg", data); err != nil {
+		return err
+	}
+
+	return writeFile("site.webmanifest", buildFaviconManifest())
+}
+
+// parseFaviconShapes parses the logo SVG into flattened filled shapes. Only
+// the plain SVG features the logo uses are supported: translate transforms,
+// and paths with fill (attribute or style) built from M/L/H/V/C/Z commands.
+func parseFaviconShapes(data []byte) ([]faviconShape, error) {
+	var root svgNode
+	if err := xml.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+
+	var shapes []faviconShape
+	if err := collectFaviconShapes(&root, 0, 0, &shapes); err != nil {
+		return nil, err
+	}
+	return shapes, nil
+}
+
+// collectFaviconShapes walks the SVG tree accumulating translate transforms
+// and turning each filled <path> into a faviconShape.
+func collectFaviconShapes(n *svgNode, tx, ty float64, shapes *[]faviconShape) error {
+	tx, ty = faviconTransform(n, tx, ty)
+
+	if n.XMLName.Local == "path" {
+		fill, ok := nodeFill(n)
+		if ok {
+			polys, err := parseFaviconPathData(nodeAttr(n, "d"), tx, ty)
+			if err != nil {
+				return fmt.Errorf("path %q: %w", nodeAttr(n, "id"), err)
+			}
+			if len(polys) > 0 {
+				*shapes = append(*shapes, faviconShape{color: fill, polygons: polys})
+			}
+		}
+	}
+
+	for i := range n.Children {
+		if err := collectFaviconShapes(&n.Children[i], tx, ty, shapes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// faviconTransform adds any translate() on the node to the running transform.
+// Other transforms are ignored; the logo does not use them.
+func faviconTransform(n *svgNode, tx, ty float64) (float64, float64) {
+	t := nodeAttr(n, "transform")
+	if !strings.HasPrefix(t, "translate(") {
+		return tx, ty
+	}
+	nums := svgNumRe.FindAllString(t, -1)
+	if len(nums) < 2 {
+		return tx, ty
+	}
+	dx, err1 := strconv.ParseFloat(nums[0], 64)
+	dy, err2 := strconv.ParseFloat(nums[1], 64)
+	if err1 != nil || err2 != nil {
+		return tx, ty
+	}
+	return tx + dx, ty + dy
+}
+
+// nodeAttr returns the value of a plain (unprefixed) attribute of n.
+func nodeAttr(n *svgNode, name string) string {
+	for _, a := range n.Attrs {
+		if a.Name.Space == "" && a.Name.Local == name {
+			return a.Value
+		}
+	}
+	return ""
+}
+
+// nodeFill returns the fill colour of n, taken from a fill attribute or a
+// style attribute, preferring the explicit attribute.
+func nodeFill(n *svgNode) (color.NRGBA, bool) {
+	fill := nodeAttr(n, "fill")
+	if fill == "" {
+		for _, p := range splitStyleProps(nodeAttr(n, "style")) {
+			if p.name == "fill" {
+				fill = p.value
+			}
+		}
+	}
+	return parseFaviconColour(fill)
+}
+
+// parseFaviconColour parses hex (#rgb/#rrggbb) and a few common named
+// colours, reporting ok=false for none, url() fills and unknowns.
+func parseFaviconColour(s string) (color.NRGBA, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "none" || strings.HasPrefix(s, "url(") {
+		return color.NRGBA{}, false
+	}
+	if strings.HasPrefix(s, "#") {
+		hex := s[1:]
+		parse := func(a, b byte) (uint8, bool) {
+			v, err := strconv.ParseUint(string([]byte{a, b}), 16, 8)
+			return uint8(v), err == nil
+		}
+		var r, g, b uint8
+		var ok bool
+		switch len(hex) {
+		case 3:
+			r, ok = parse(hex[0], hex[0])
+			g, ok = parse(hex[1], hex[1])
+			b, ok = parse(hex[2], hex[2])
+		case 6:
+			r, ok = parse(hex[0], hex[1])
+			g, ok = parse(hex[2], hex[3])
+			b, ok = parse(hex[4], hex[5])
+		}
+		if ok {
+			return color.NRGBA{r, g, b, 0xff}, true
+		}
+		return color.NRGBA{}, false
+	}
+	switch strings.ToLower(s) {
+	case "red":
+		return color.NRGBA{0xff, 0, 0, 0xff}, true
+	case "yellow":
+		return color.NRGBA{0xff, 0xff, 0, 0xff}, true
+	case "black":
+		return color.NRGBA{0, 0, 0, 0xff}, true
+	case "white":
+		return color.NRGBA{0xff, 0xff, 0xff, 0xff}, true
+	}
+	return color.NRGBA{}, false
+}
+
+// svgNumRe matches a floating-point number in SVG path/transform data.
+var svgNumRe = regexp.MustCompile(`-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`)
+
+// svgToken is one token of SVG path data: a command letter or a number.
+type svgToken struct {
+	isCmd bool
+	cmd   byte
+	val   float64
+}
+
+// svgPathTokens splits SVG path data into commands and numbers.
+func svgPathTokens(d string) ([]svgToken, error) {
+	var toks []svgToken
+	i := 0
+	for i < len(d) {
+		switch c := d[i]; {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',':
+			i++
+		case strings.ContainsRune("MmZzLlHhVvCcSsQqTtAa", rune(c)):
+			toks = append(toks, svgToken{isCmd: true, cmd: c})
+			i++
+		case c == '-' || c == '+' || c == '.' || (c >= '0' && c <= '9'):
+			m := svgNumRe.FindString(d[i:])
+			if m == "" {
+				return nil, fmt.Errorf("unexpected character %q in path data", c)
+			}
+			v, err := strconv.ParseFloat(m, 64)
+			if err != nil {
+				return nil, err
+			}
+			toks = append(toks, svgToken{val: v})
+			i += len(m)
+		default:
+			return nil, fmt.Errorf("unexpected character %q in path data", c)
+		}
+	}
+	return toks, nil
+}
+
+// parseFaviconPathData converts SVG path data into closed polygons, applying
+// the group translate (tx,ty). Only the commands the logo uses are supported.
+func parseFaviconPathData(d string, tx, ty float64) ([][]fpoint, error) {
+	toks, err := svgPathTokens(d)
+	if err != nil {
+		return nil, err
+	}
+
+	var polys [][]fpoint
+	var cur []fpoint
+	var x, y, sx, sy float64
+	var cmd byte
+	i := 0
+
+	next := func() (float64, error) {
+		if i >= len(toks) || toks[i].isCmd {
+			return 0, fmt.Errorf("expected a number in path data")
+		}
+		v := toks[i].val
+		i++
+		return v, nil
+	}
+
+	// point reads one coordinate pair relative to the current point (for
+	// relative commands), advances the untransformed cursor and returns the
+	// transformed point.
+	point := func(relative bool) (fpoint, error) {
+		a, err := next()
+		if err != nil {
+			return fpoint{}, err
+		}
+		b, err := next()
+		if err != nil {
+			return fpoint{}, err
+		}
+		if relative {
+			a, b = x+a, y+b
+		}
+		x, y = a, b
+		return fpoint{a + tx, b + ty}, nil
+	}
+
+	closePath := func() {
+		if len(cur) > 0 {
+			polys = append(polys, cur)
+			cur = nil
+		}
+	}
+
+	for i < len(toks) {
+		if toks[i].isCmd {
+			cmd = toks[i].cmd
+			i++
+			continue
+		}
+		rel := cmd >= 'a' && cmd <= 'z'
+		switch cmd {
+		case 'M', 'm':
+			closePath()
+			p, err := point(rel)
+			if err != nil {
+				return nil, err
+			}
+			sx, sy = x, y
+			cur = append(cur, p)
+			if rel {
+				cmd = 'l'
+			} else {
+				cmd = 'L'
+			}
+		case 'L', 'l':
+			p, err := point(rel)
+			if err != nil {
+				return nil, err
+			}
+			cur = append(cur, p)
+		case 'H', 'h':
+			a, err := next()
+			if err != nil {
+				return nil, err
+			}
+			if rel {
+				a = x + a
+			}
+			x = a
+			cur = append(cur, fpoint{a + tx, y + ty})
+		case 'V', 'v':
+			b, err := next()
+			if err != nil {
+				return nil, err
+			}
+			if rel {
+				b = y + b
+			}
+			y = b
+			cur = append(cur, fpoint{x + tx, b + ty})
+		case 'C', 'c':
+			for {
+				baseX, baseY := x, y
+				dx1, err := next()
+				if err != nil {
+					return nil, err
+				}
+				dy1, err := next()
+				if err != nil {
+					return nil, err
+				}
+				dx2, err := next()
+				if err != nil {
+					return nil, err
+				}
+				dy2, err := next()
+				if err != nil {
+					return nil, err
+				}
+				dx, err := next()
+				if err != nil {
+					return nil, err
+				}
+				dy, err := next()
+				if err != nil {
+					return nil, err
+				}
+				var c1, c2, p3 fpoint
+				if rel {
+					c1 = fpoint{baseX + dx1 + tx, baseY + dy1 + ty}
+					c2 = fpoint{baseX + dx2 + tx, baseY + dy2 + ty}
+					p3 = fpoint{baseX + dx + tx, baseY + dy + ty}
+					x, y = baseX+dx, baseY+dy
+				} else {
+					c1 = fpoint{dx1 + tx, dy1 + ty}
+					c2 = fpoint{dx2 + tx, dy2 + ty}
+					p3 = fpoint{dx + tx, dy + ty}
+					x, y = dx, dy
+				}
+				flattenFaviconCubic(fpoint{baseX + tx, baseY + ty}, c1, c2, p3, &cur)
+				if i >= len(toks) || toks[i].isCmd {
+					break
+				}
+			}
+		case 'Z', 'z':
+			if len(cur) > 0 {
+				if start := cur[0]; cur[len(cur)-1] != start {
+					cur = append(cur, start)
+				}
+			}
+			closePath()
+			x, y = sx, sy
+		default:
+			return nil, fmt.Errorf("unsupported path command %q", cmd)
+		}
+	}
+	closePath()
+	return polys, nil
+}
+
+// flattenFaviconCubic appends the end point of a cubic Bezier, subdividing
+// until it is flat enough to be a straight line.
+func flattenFaviconCubic(p0, p1, p2, p3 fpoint, out *[]fpoint) {
+	flattenFaviconCubicRec(p0, p1, p2, p3, out, 0)
+}
+
+func flattenFaviconCubicRec(p0, p1, p2, p3 fpoint, out *[]fpoint, depth int) {
+	if depth > 12 || math.Abs(p1.x-p3.x)+math.Abs(p1.y-p3.y)+math.Abs(p2.x-p3.x)+math.Abs(p2.y-p3.y) < 0.5 {
+		*out = append(*out, p3)
+		return
+	}
+	mid := func(a, b fpoint) fpoint {
+		return fpoint{(a.x + b.x) / 2, (a.y + b.y) / 2}
+	}
+	p01, p12, p23 := mid(p0, p1), mid(p1, p2), mid(p2, p3)
+	p012, p123 := mid(p01, p12), mid(p12, p23)
+	pm := mid(p012, p123)
+	flattenFaviconCubicRec(p0, p01, p012, pm, out, depth+1)
+	flattenFaviconCubicRec(pm, p123, p23, p3, out, depth+1)
+}
+
+// renderFaviconPNG rasterises the logo shapes into a size-by-size PNG.
+func renderFaviconPNG(shapes []faviconShape, size int) ([]byte, error) {
+	img := rasteriseFavicon(shapes, size)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// rasteriseFavicon draws the logo centred into a transparent square, keeping
+// its aspect ratio. Shapes are scanline-filled in document order (so the
+// black outline wins where it overlaps the fills) into a 2x-bigger canvas,
+// then box-downsampled for anti-aliased edges.
+func rasteriseFavicon(shapes []faviconShape, size int) *image.NRGBA {
+	const ss = 2
+	big := size * ss
+
+	img := image.NewNRGBA(image.Rect(0, 0, big, big))
+	scale := math.Min(float64(big)/faviconCanvasW, float64(big)/faviconCanvasH)
+	ox := (float64(big) - faviconCanvasW*scale) / 2
+	oy := (float64(big) - faviconCanvasH*scale) / 2
+
+	for i := range shapes {
+		scanFillFavicon(img, &shapes[i], scale, ox, oy)
+	}
+
+	out := image.NewNRGBA(image.Rect(0, 0, size, size))
+	block := ss * ss
+	var acc [3]int
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			acc = [3]int{}
+			covered := 0
+			for sy := 0; sy < ss; sy++ {
+				for sx := 0; sx < ss; sx++ {
+					c := img.NRGBAAt(x*ss+sx, y*ss+sy)
+					if c.A != 0 {
+						covered++
+					}
+					acc[0] += int(c.R)
+					acc[1] += int(c.G)
+					acc[2] += int(c.B)
+				}
+			}
+			if covered > 0 {
+				out.SetNRGBA(x, y, color.NRGBA{
+					R: uint8((acc[0] + block/2) / block),
+					G: uint8((acc[1] + block/2) / block),
+					B: uint8((acc[2] + block/2) / block),
+					A: uint8((covered*255 + block/2) / block),
+				})
+			}
+		}
+	}
+	return out
+}
+
+// faviconEdge is one polygon edge for scanline filling, kept in its original
+// direction so the nonzero winding rule can be applied across subpaths.
+type faviconEdge struct {
+	x1, y1 float64
+	x2, y2 float64
+}
+
+// scanFillFavicon maps a shape's polygons into image coordinates (the logo is
+// fitted inside a square, keeping its aspect ratio) and fills them with the
+// nonzero winding rule, matching the SVG default fill-rule that the logo was
+// designed with: subpaths with the same orientation union, opposite ones carve
+// holes.
+func scanFillFavicon(img *image.NRGBA, s *faviconShape, scale, ox, oy float64) {
+	var edges []faviconEdge
+	minY, maxY := math.Inf(1), math.Inf(-1)
+	for _, poly := range s.polygons {
+		n := len(poly)
+		if n == 0 {
+			continue
+		}
+		for i := 0; i < n; i++ {
+			p1, p2 := poly[i], poly[(i+1)%n]
+			if p1.y == p2.y {
+				continue
+			}
+			e := faviconEdge{
+				x1: p1.x*scale + ox,
+				y1: p1.y*scale + oy,
+				x2: p2.x*scale + ox,
+				y2: p2.y*scale + oy,
+			}
+			if e.y1 < minY {
+				minY = e.y1
+			}
+			if e.y1 > maxY {
+				maxY = e.y1
+			}
+			if e.y2 < minY {
+				minY = e.y2
+			}
+			if e.y2 > maxY {
+				maxY = e.y2
+			}
+			edges = append(edges, e)
+		}
+	}
+	if len(edges) == 0 {
+		return
+	}
+
+	rowMin := int(math.Ceil(minY)) - 1
+	if rowMin < img.Bounds().Min.Y {
+		rowMin = img.Bounds().Min.Y
+	}
+	rowMax := int(math.Floor(maxY))
+	if rowMax > img.Bounds().Max.Y-1 {
+		rowMax = img.Bounds().Max.Y - 1
+	}
+
+	type crossing struct {
+		x   float64
+		dir int
+	}
+	for row := rowMin; row <= rowMax; row++ {
+		y := float64(row) + 0.5
+		var cs []crossing
+		for _, e := range edges {
+			if (e.y1 <= y && e.y2 > y) || (e.y2 <= y && e.y1 > y) {
+				x := e.x1 + (y-e.y1)*(e.x2-e.x1)/(e.y2-e.y1)
+				dir := 1
+				if e.y1 > e.y2 {
+					dir = -1
+				}
+				cs = append(cs, crossing{x, dir})
+			}
+		}
+		sort.Slice(cs, func(i, j int) bool { return cs[i].x < cs[j].x })
+		winding := 0
+		for k := 0; k < len(cs); k++ {
+			winding += cs[k].dir
+			if winding != 0 && k+1 < len(cs) {
+				x0, x1 := cs[k].x, cs[k+1].x
+				xStart := int(math.Ceil(x0))
+				if xStart < img.Bounds().Min.X {
+					xStart = img.Bounds().Min.X
+				}
+				xEnd := int(math.Floor(x1))
+				if xEnd > img.Bounds().Max.X-1 {
+					xEnd = img.Bounds().Max.X - 1
+				}
+				for x := xStart; x <= xEnd; x++ {
+					img.SetNRGBA(x, row, s.color)
+				}
+			}
+		}
+	}
+}
+
+// encodeICO wraps PNG images into an ICO container (PNG compression inside
+// ICO is supported by Windows Vista and later and every modern browser).
+func encodeICO(pngs [][]byte, sizes []int) ([]byte, error) {
+	if len(pngs) != len(sizes) {
+		return nil, fmt.Errorf("icon count %d does not match sizes %d", len(pngs), len(sizes))
+	}
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, uint16(0)); err != nil { // reserved
+		return nil, err
+	}
+	if err := binary.Write(&buf, binary.LittleEndian, uint16(1)); err != nil { // type: icon
+		return nil, err
+	}
+	if err := binary.Write(&buf, binary.LittleEndian, uint16(len(pngs))); err != nil { // count
+		return nil, err
+	}
+
+	offset := 6 + 16*len(pngs)
+	for i, size := range sizes {
+		var entry bytes.Buffer
+		if size >= 256 {
+			entry.WriteByte(0)
+		} else {
+			entry.WriteByte(byte(size))
+		}
+		if size >= 256 {
+			entry.WriteByte(0)
+		} else {
+			entry.WriteByte(byte(size))
+		}
+		entry.WriteByte(0) // palette entries
+		entry.WriteByte(0) // reserved
+		if err := binary.Write(&entry, binary.LittleEndian, uint16(1)); err != nil { // planes
+			return nil, err
+		}
+		if err := binary.Write(&entry, binary.LittleEndian, uint16(32)); err != nil { // bit count
+			return nil, err
+		}
+		if err := binary.Write(&entry, binary.LittleEndian, uint32(len(pngs[i]))); err != nil { // bytes
+			return nil, err
+		}
+		if err := binary.Write(&entry, binary.LittleEndian, uint32(offset)); err != nil { // offset
+			return nil, err
+		}
+		offset += len(pngs[i])
+		buf.Write(entry.Bytes())
+	}
+	for _, p := range pngs {
+		buf.Write(p)
+	}
+	return buf.Bytes(), nil
+}
+
+// buildFaviconManifest returns the web app manifest referencing the generated
+// icons. start_url is relative so the app still works under a proxy sub-path.
+func buildFaviconManifest() []byte {
+	return []byte(`{
+  "name": "Magooify",
+  "short_name": "Magooify",
+  "icons": [
+    { "src": "favicon-16x16.png", "sizes": "16x16", "type": "image/png" },
+    { "src": "favicon-32x32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "favicon-48x48.png", "sizes": "48x48", "type": "image/png" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "theme_color": "#6366f1",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "start_url": "./"
+}`)
+}
+
 func main() {
 	registerMimeTypes()
 
@@ -172,6 +821,7 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "Disable automatic browser launch in desktop mode")
 	genDocs := flag.String("gen-docs", "", "Write the Swagger UI documentation page to the given path and exit")
 	cleanLogo := flag.String("clean-logo", "", "Remove Inkscape-specific parts from the given SVG logo file in place and exit")
+	genFavicons := flag.String("gen-favicons", "", "Render the UI logo into favicon files (ICO, PNG, SVG, web manifest) in the given UI directory and exit")
 	openRouterKey := flag.String("openrouter-key", getEnv("OPENROUTER_API_KEY", ""), "OpenRouter API key used to process captured images")
 	managementKey := flag.String("openrouter-management-key", getEnv("OPENROUTER_MANAGEMENT_KEY", ""), "OpenRouter management key used to query account credits; cannot process images")
 	outputDir := flag.String("output-dir", getEnv("OUTPUT_DIR", defaultOutputDir), "Directory where processed images and their descriptions are stored")
@@ -195,6 +845,16 @@ func main() {
 			log.Fatalf("Failed to clean logo: %v", err)
 		}
 		log.Printf("Cleaned logo: %s", *cleanLogo)
+		return
+	}
+
+	// Offline favicon generation (used by the build script to render the UI
+	// logo into the favicon files embedded in the executable).
+	if *genFavicons != "" {
+		if err := generateFavicons(*genFavicons); err != nil {
+			log.Fatalf("Failed to generate favicons: %v", err)
+		}
+		log.Printf("Generated favicons in %s", *genFavicons)
 		return
 	}
 
