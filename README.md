@@ -29,4 +29,4 @@ If you are a system administrator wanting to install and manage this application
 
 ## Developers
 
-If you want to customise or extend this project you are very welcome to - see the [developers documentation](docs/developers.md) for more details.
+If you want to customise or extend this project you are very welcome to - see the [developer's documentation](docs/developers.md) for more details.
