@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"math"
 	"mime"
@@ -612,6 +613,50 @@ func TestApplyPalettePromptUnknownIDReturnsBase(t *testing.T) {
 	}
 }
 
+func TestForcePNGReEncodesAsPNG(t *testing.T) {
+	// Start with a small valid JPEG and confirm forcePNG returns PNG bytes.
+	jpgSrc := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	var jpgBuf bytes.Buffer
+	if err := jpeg.Encode(&jpgBuf, jpgSrc, &jpeg.Options{Quality: 80}); err != nil {
+		t.Fatalf("failed to build JPEG test fixture: %v", err)
+	}
+	got, err := forcePNG(jpgBuf.Bytes())
+	if err != nil {
+		t.Fatalf("forcePNG returned error: %v", err)
+	}
+	if _, ft, err := image.DecodeConfig(bytes.NewReader(got)); err != nil {
+		t.Fatalf("forcePNG output is not a valid image: %v", err)
+	} else if ft != "png" {
+		t.Errorf("forcePNG output format = %q, want png", ft)
+	}
+	// PNG input should round-trip cleanly too.
+	pngBytes := pngOf(2, 2, func(x, y int) bool { return x == 0 && y == 0 })
+	got, err = forcePNG(pngBytes)
+	if err != nil {
+		t.Fatalf("forcePNG on PNG returned error: %v", err)
+	}
+	if _, ft, _ := image.DecodeConfig(bytes.NewReader(got)); ft != "png" {
+		t.Errorf("forcePNG(PNG) output format = %q, want png", ft)
+	}
+}
+
+func TestForcePNGLeavesSVGAlone(t *testing.T) {
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"></svg>`)
+	got, err := forcePNG(svg)
+	if err != nil {
+		t.Fatalf("forcePNG on SVG returned error: %v", err)
+	}
+	if !bytes.Equal(got, svg) {
+		t.Errorf("forcePNG modified an SVG document")
+	}
+}
+
+func TestForcePNGRejectsGarbage(t *testing.T) {
+	if _, err := forcePNG([]byte("not an image")); err == nil {
+		t.Errorf("forcePNG should fail on undecodable input")
+	}
+}
+
 func TestProcessImageNoKey(t *testing.T) {
 	a := newAPI(false, docsFS)
 	a.outputDir = t.TempDir()
@@ -739,8 +784,13 @@ func TestImageProcessingRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read stored image: %v", err)
 	}
-	if !bytes.Equal(stored, miniPNG) {
-		t.Errorf("stored bytes do not match the processed image returned by the model")
+	// Bitmap output is always re-encoded as PNG before storage, so the file
+	// must be a valid PNG that decodes to a 1x1 image regardless of what
+	// the model returned.
+	if _, ct, err := image.DecodeConfig(bytes.NewReader(stored)); err != nil {
+		t.Errorf("stored image is not a valid image: %v", err)
+	} else if ct != "png" {
+		t.Errorf("stored format = %q, want png", ct)
 	}
 	entries, _ := os.ReadDir(a.outputDir)
 	for _, e := range entries {
@@ -767,7 +817,8 @@ func TestImageProcessingRoutes(t *testing.T) {
 		t.Errorf("listed filename = %q, want %q", list.Images[0].Filename, processed.Filename)
 	}
 
-	// The stored image must be served back with the correct content type.
+	// The stored image must be served back with the correct content type and
+	// it must be the same PNG-encoded file the server wrote.
 	req3 := httptest.NewRequest("GET", "/api/v1/images/"+processed.Filename, nil)
 	rr3 := httptest.NewRecorder()
 	handler.ServeHTTP(rr3, req3)
@@ -777,8 +828,11 @@ func TestImageProcessingRoutes(t *testing.T) {
 	if ct := rr3.Header().Get("Content-Type"); ct != "image/png" {
 		t.Errorf("content-type = %q, want %q", ct, "image/png")
 	}
-	if !bytes.Equal(rr3.Body.Bytes(), miniPNG) {
-		t.Errorf("served image bytes do not match the processed image")
+	if !bytes.Equal(rr3.Body.Bytes(), stored) {
+		t.Errorf("served image bytes do not match the stored image")
+	}
+	if _, ct, _ := image.DecodeConfig(bytes.NewReader(rr3.Body.Bytes())); ct != "png" {
+		t.Errorf("served image format = %q, want png", ct)
 	}
 }
 
@@ -1321,8 +1375,12 @@ func TestProcessImageFallsBackToImagesEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read stored image: %v", err)
 	}
-	if !bytes.Equal(stored, miniPNG) {
-		t.Errorf("stored bytes do not match the images endpoint output")
+	// Bitmap output is re-encoded as PNG before storage; the file must be a
+	// valid PNG regardless of the format returned by the model.
+	if _, ct, err := image.DecodeConfig(bytes.NewReader(stored)); err != nil {
+		t.Errorf("stored image is not a valid image: %v", err)
+	} else if ct != "png" {
+		t.Errorf("stored format = %q, want png", ct)
 	}
 }
 

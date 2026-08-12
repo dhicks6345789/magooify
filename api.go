@@ -13,10 +13,16 @@ import (
 	"math"
 	"mime"
 	"net/http"
-	"net/url"
+"net/url"
 	"os"
-	"regexp"
 	"path/filepath"
+	"regexp"
+	"image"
+	"image/png"
+
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"runtime"
 	"sort"
 	"strconv"
@@ -146,7 +152,7 @@ type ProcessImageRequest struct {
 	Image    string `json:"image" example:"data:image/jpeg;base64,..."`
 	Filename string `json:"filename" example:"photo.jpg"`
 	Prompt   string `json:"prompt" example:"Clean this scanned image"`
-	Output   string `json:"output" example:"img-20260806-123000-a1b2c3d4.jpg"`
+	Output   string `json:"output" example:"img-20260806-123000-a1b2c3d4.png"`
 	// Vectorise traces the processed image into a resolution-independent SVG
 	// document with one colour layer per colour in the artwork, on a
 	// transparent background. Models that already return SVG are passed
@@ -214,7 +220,7 @@ type ModelsResponse struct {
 
 // StoredImage describes a processed image stored on the file system.
 type StoredImage struct {
-	Filename string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.jpg"`
+Filename    string    `json:"filename" example:"img-20260806-123000-a1b2c3d4.png"`
 	Size     int64     `json:"size" example:"48291"`
 	Modified time.Time `json:"modified"`
 }
@@ -936,6 +942,13 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 			a.jsonError(w, http.StatusBadRequest, "Cannot vectorise the processed image: "+verr.Error())
 			return
 		}
+	} else {
+		png, perr := forcePNG(processed)
+		if perr != nil {
+			a.jsonError(w, http.StatusBadRequest, "Cannot re-encode the processed image to PNG: "+perr.Error())
+			return
+		}
+		processed = png
 	}
 
 	a.mu.Lock()
@@ -1388,6 +1401,26 @@ func extensionForContent(img []byte) string {
 		return ".svg"
 	}
 	return extensionForContentType(http.DetectContentType(img))
+}
+
+// forcePNG re-encodes a bitmap image as PNG so the saved file (and the
+// download the user gets) is always PNG rather than JPEG, even when the
+// underlying model returned a JPEG/WEBP/GIF image. SVG documents are
+// returned unchanged because they aren’t a raster format that PNG could
+// represent losslessly.
+func forcePNG(img []byte) ([]byte, error) {
+	if isSVGDocument(img) {
+		return img, nil
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(img))
+	if err != nil {
+		return nil, fmt.Errorf("cannot re-encode processed image to PNG: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, decoded); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // extensionForContentType maps a MIME content type to a file extension.

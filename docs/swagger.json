@@ -570,7 +570,7 @@
             "properties": {
                 "filename": {
                     "type": "string",
-                    "example": "img-20260806-123000-a1b2c3d4.jpg"
+                    "example": "img-20260806-123000-a1b2c3d4.png"
                 },
                 "modified": {
                     "type": "string"
