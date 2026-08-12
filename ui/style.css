@@ -8,16 +8,11 @@ body {
   align-items: center;
 }
 
-.brand-icon {
+.brand-logo {
   display: inline-block;
-  width: 2rem;
   height: 2rem;
-  line-height: 2rem;
-  text-align: center;
-  border-radius: 0.5rem;
-  background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+  width: auto;
   margin-right: 0.5rem;
-  font-weight: 700;
 }
 
 .drop-zone {

@@ -1,58 +1,6 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   xmlns:dc="http://purl.org/dc/elements/1.1/"
-   xmlns:cc="http://creativecommons.org/ns#"
-   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-   xmlns:svg="http://www.w3.org/2000/svg"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   width="250mm"
-   height="300mm"
-   viewBox="0 0 250 300"
-   version="1.1"
-   id="svg8"
-   inkscape:version="1.0.2-2 (e86c870879, 2021-01-15)"
-   sodipodi:docname="Magooify.svg">
-  <defs
-     id="defs2" />
-  <sodipodi:namedview
-     id="base"
-     pagecolor="#ffffff"
-     bordercolor="#666666"
-     borderopacity="1.0"
-     inkscape:pageopacity="0.0"
-     inkscape:pageshadow="2"
-     inkscape:zoom="0.98994949"
-     inkscape:cx="429.46291"
-     inkscape:cy="566.4567"
-     inkscape:document-units="mm"
-     inkscape:current-layer="svg8"
-     inkscape:document-rotation="0"
-     showgrid="false"
-     inkscape:snap-global="false"
-     inkscape:window-width="2560"
-     inkscape:window-height="1417"
-     inkscape:window-x="-8"
-     inkscape:window-y="-8"
-     inkscape:window-maximized="1"
-     fit-margin-top="0"
-     fit-margin-left="0"
-     fit-margin-right="0"
-     fit-margin-bottom="0" />
-  <metadata
-     id="metadata5">
-    <rdf:RDF>
-      <cc:Work
-         rdf:about="">
-        <dc:format>image/svg+xml</dc:format>
-        <dc:type
-           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
-      </cc:Work>
-    </rdf:RDF>
-  </metadata>
-  <g
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="250" height="300" viewBox="0 0 250 300">
+<g
      inkscape:groupmode="layer"
      id="layer2"
      inkscape:label="Fill"
@@ -66,7 +14,7 @@
        d="m 85.182527,135.83046 -16.215488,6.10792 -12.672611,9.99476 -5.450583,9.57832 -1.226382,10.68886 3.406614,5.83028 6.268173,5.55265 8.448407,3.05395 11.582492,2.08226 7.767084,0.41644 8.448405,-0.41644 9.538522,-1.80463 9.12974,-3.33158 6.26817,-3.88685 6.54068,-5.69147 4.63301,-8.32898 0.27253,-7.35726 -3.40662,-8.32897 -5.72311,-5.96911 -6.1319,-4.44212 -8.85721,-3.05395 -8.720933,-1.52698 z"
        id="path850" />
   </g>
-  <g
+<g
      inkscape:label="Lines"
      inkscape:groupmode="layer"
      id="layer1"
