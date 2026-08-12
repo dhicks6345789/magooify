@@ -1,16 +1,15 @@
 # <img src="./ui/logo.svg" width="50" valign="middle"> Magooify
 
-Turn your quick, roughly-sketched cartoons into clean, scaleable images with smooth lines and consistent colours.
+Turn your quick, roughly-sketched pen-and-ink black-line style cartoons into clean, scaleable images with smooth lines and consistent colours.
 
 ## Features
 
-- **Image Capture**: Take photos from your device (phone or tablet), scan from a desktop visualiser, or simply upload an image.
-- **AI Image Processing**: Images are processed to smooth lines, create consistent colours and fill shapes. The prompt used for processing is customisable, and the model used can be selected.
-- **Vectorise to SVG**: Optionally trace the processed image into a resolution-independent SVG image.
-- **File System Storage**: The processed image is saved to a configurable output directory.
-- **Designed For Schools**: Can integrate with your authentication provider (Google, Microsoft, etc) via an authenticating proxy, cloud storage (Google Drive, OneDrive, etc) and filtered / budget-controlled AI API router, making it suitable for educational establishment looking to limit AI tool usage. It can even colour-match the felt-tip pens you use!
-- **Self-Hostable**: With a web-based interface and a self-contained, single-executable backend, this application is self-hostable on pretty much any platform, meaning you can control exactly what happens with your user's content.
-- **Easy To Customise**: Built in Go with an AI agent, adding or changing features should be a simple case of describing what you want done.
+- **Image Capture**: Take photos from your device (laptop, desktop, phone or tablet), scan from a [desktop visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser), or simply upload an image.
+- **AI Image Processing**: Images are processed to smooth lines, create consistent colours and fill shapes. The prompt used for processing is customisable, and the AI model used can be selected.
+- **Vectorise to SVG**: Optionally trace the processed image into a scaleable SVG image.
+- **Designed For Schools**: Can integrate with your authentication provider (Google, Microsoft, etc) via an authenticating proxy (Cloudflare Tunnels, Pangolin, etc), cloud storage (Google Drive, OneDrive, etc) and filtered / budget-controlled AI API router, making it suitable for educational establishment looking to manage their pupil's AI tool usage. It can even colour-match the felt-tip pens, pencils or crayons you use in class!
+- **Self-Hostable**: With a web-based interface and a self-contained, single-executable backend, this application is self-hostable on pretty much any platform, meaning you can control exactly what happens to your user's content.
+- **Easy To Customise**: Built in [Go](https://developers.googleblog.com/why-go-is-an-ideal-language-for-ai-assisted-software-engineering) using an AI agent, adding or changing features should be a simple case of describing what you want done.
 
 ---
 
