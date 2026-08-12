@@ -1,5 +1,7 @@
 # Magooify
 
+![Magooify logo](ui/logo.svg)
+
 Magooify is a self-hostable Go application that bundles application logic, an embedded Bootstrap web user interface and interactive OpenAPI documentation into a single executable.
 
 The web interface lets you take a photo with your device camera or upload (or drag and drop) an image file. Magooify sends the image to an image-capable model on OpenRouter for processing, then saves the processed version of the image to a folder on disk.
