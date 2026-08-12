@@ -249,7 +249,7 @@ func TestServeAllRoutes(t *testing.T) {
 		wantBody    string
 	}{
 		{"/", http.StatusOK, "text/html", "Magooify"},
-		{"/style.css", http.StatusOK, "text/css", ".brand-icon"},
+		{"/style.css", http.StatusOK, "text/css", ".brand-logo"},
 		{"/vendor/bootstrap/bootstrap.min.css", http.StatusOK, "text/css", "bootstrap"},
 		{"/app.js", http.StatusOK, "text/javascript", "DOMContentLoaded"},
 		{"/api/v1/user", http.StatusOK, "application/json", `"auth_type"`},
@@ -444,7 +444,7 @@ func TestServeUnderBasePath(t *testing.T) {
 	}{
 		// Under the base path.
 		{"/magooify/", http.StatusOK, "text/html", "Magooify"},
-		{"/magooify/style.css", http.StatusOK, "text/css", ".brand-icon"},
+		{"/magooify/style.css", http.StatusOK, "text/css", ".brand-logo"},
 		{"/magooify/vendor/bootstrap/bootstrap.min.css", http.StatusOK, "text/css", "bootstrap"},
 		{"/magooify/app.js", http.StatusOK, "text/javascript", "DOMContentLoaded"},
 		{"/magooify/api/v1/user", http.StatusOK, "application/json", `"auth_type"`},
@@ -454,7 +454,7 @@ func TestServeUnderBasePath(t *testing.T) {
 		{"/magooify/docs/swagger-ui/swagger-ui.css", http.StatusOK, "text/css", "swagger-ui"},
 		// The site root keeps working alongside the base path.
 		{"/", http.StatusOK, "text/html", "Magooify"},
-		{"/style.css", http.StatusOK, "text/css", ".brand-icon"},
+		{"/style.css", http.StatusOK, "text/css", ".brand-logo"},
 		{"/app.js", http.StatusOK, "text/javascript", "DOMContentLoaded"},
 		{"/api/v1/health", http.StatusOK, "application/json", `"ok"`},
 		{"/docs/api", http.StatusOK, "text/html", "swagger-ui"},

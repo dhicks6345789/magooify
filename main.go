@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"embed"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"image"
@@ -60,6 +61,103 @@ func registerMimeTypes() {
 	mime.AddExtensionType(".pdf", "application/pdf")
 }
 
+// svgNode is a generic SVG element tree used to rebuild the logo without
+// Inkscape-only namespaces, generated ids and redundant style defaults.
+type svgNode struct {
+	XMLName  xml.Name
+	Attrs    []xml.Attr `xml:",any,attr"`
+	Children []svgNode  `xml:",any"`
+}
+
+// cleanLogoSVG strips Inkscape-specific parts from the SVG logo file at path,
+// leaving a plain, standard SVG that renders in all browsers. The file is
+// rewritten in place.
+func cleanLogoSVG(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var root svgNode
+	if err := xml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("parsing %s: %w", path, err)
+	}
+
+	cleanSVGNode(&root)
+
+	out, err := xml.MarshalIndent(&root, "", "  ")
+	if err != nil {
+		return err
+	}
+	out = append([]byte(xml.Header), out...)
+	out = append(out, '\n')
+
+	return os.WriteFile(path, out, 0o644)
+}
+
+// cleanSVGNode recursively removes Inkscape/Sodipodi namespaced attributes and
+// elements, Inkscape-generated ids, and collapses verbose style attributes
+// down to plain fill/stroke attributes.
+func cleanSVGNode(n *svgNode) {
+	// Drop the resolved default namespace: the root keeps its plain xmlns
+	// attribute, so re-marshaling emits unprefixed elements without adding
+	// redundant xmlns declarations to every node.
+	n.XMLName.Space = ""
+
+	var attrs []xml.Attr
+	for _, a := range n.Attrs {
+		switch {
+		case a.Name.Space == "inkscape" || a.Name.Space == "sodipodi":
+			continue
+		case a.Name.Space == "" && a.Name.Local == "id":
+			continue
+		case a.Name.Space == "" && a.Name.Local == "style":
+			for _, prop := range splitStyleProps(a.Value) {
+				if (prop.name == "fill" || prop.name == "stroke") && prop.value != "" && prop.value != "none" {
+					attrs = append(attrs, xml.Attr{Name: xml.Name{Local: prop.name}, Value: prop.value})
+				}
+			}
+			continue
+		}
+		attrs = append(attrs, a)
+	}
+	n.Attrs = attrs
+
+	var children []svgNode
+	for i := range n.Children {
+		c := &n.Children[i]
+		if c.XMLName.Space == "inkscape" || c.XMLName.Space == "sodipodi" ||
+			c.XMLName.Local == "metadata" ||
+			c.XMLName.Local == "namedview" ||
+			(c.XMLName.Local == "defs" && len(c.Children) == 0) {
+			continue
+		}
+		cleanSVGNode(c)
+		children = append(children, *c)
+	}
+	n.Children = children
+}
+
+// styleProp is a single property from a CSS style attribute.
+type styleProp struct {
+	name  string
+	value string
+}
+
+// splitStyleProps parses a style attribute such as
+// "fill:#ffff00;fill-opacity:1;stroke:none" into its name/value pairs.
+func splitStyleProps(style string) []styleProp {
+	var props []styleProp
+	for _, part := range strings.Split(style, ";") {
+		name, value, ok := strings.Cut(part, ":")
+		if !ok {
+			continue
+		}
+		props = append(props, styleProp{name: strings.TrimSpace(name), value: strings.TrimSpace(value)})
+	}
+	return props
+}
+
 func main() {
 	registerMimeTypes()
 
@@ -73,6 +171,7 @@ func main() {
 	basePath := flag.String("base-path", getEnv("BASE_PATH", ""), "Comma-separated URL prefixes to serve under when mounted behind a reverse proxy at sub-paths (e.g. /magooify); the app is always also served from the site root")
 	noBrowser := flag.Bool("no-browser", false, "Disable automatic browser launch in desktop mode")
 	genDocs := flag.String("gen-docs", "", "Write the Swagger UI documentation page to the given path and exit")
+	cleanLogo := flag.String("clean-logo", "", "Remove Inkscape-specific parts from the given SVG logo file in place and exit")
 	openRouterKey := flag.String("openrouter-key", getEnv("OPENROUTER_API_KEY", ""), "OpenRouter API key used to process captured images")
 	managementKey := flag.String("openrouter-management-key", getEnv("OPENROUTER_MANAGEMENT_KEY", ""), "OpenRouter management key used to query account credits; cannot process images")
 	outputDir := flag.String("output-dir", getEnv("OUTPUT_DIR", defaultOutputDir), "Directory where processed images and their descriptions are stored")
@@ -86,6 +185,16 @@ func main() {
 			log.Fatalf("Failed to write docs to %s: %v", *genDocs, err)
 		}
 		log.Printf("Wrote API documentation to %s", *genDocs)
+		return
+	}
+
+	// Offline logo cleanup (used by the build script to strip Inkscape-specific
+	// parts from the UI logo, leaving a plain SVG that renders in all browsers).
+	if *cleanLogo != "" {
+		if err := cleanLogoSVG(*cleanLogo); err != nil {
+			log.Fatalf("Failed to clean logo: %v", err)
+		}
+		log.Printf("Cleaned logo: %s", *cleanLogo)
 		return
 	}
 
