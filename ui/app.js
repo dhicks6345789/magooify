@@ -225,9 +225,6 @@ document.addEventListener('DOMContentLoaded', () => {
   paletteCheck.addEventListener('change', () => {
     const shown = paletteCheck.checked;
     paletteCollapse.classList.toggle('show', shown);
-    if (shown) {
-      vectoriseCheck.checked = true;
-    }
     refreshPromptPreview();
   });
 

@@ -929,7 +929,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if pl.vectorise || pl.palette != "" {
+	if pl.vectorise {
 		if vectorised, verr := vectoriseBitmap(processed, pl.palette); verr == nil {
 			processed = vectorised
 		} else {
