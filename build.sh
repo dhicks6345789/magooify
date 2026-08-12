@@ -136,6 +136,14 @@ index() {
     echo "---"
     echo
     cat README.md
+    echo
+    echo "---"
+    echo
+    cat docs/running.md
+    echo
+    echo "---"
+    echo
+    cat docs/developers.md
   } > "$HUGO_SITE/content/_index.md"
 
   write_downloads_data
