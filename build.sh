@@ -156,6 +156,7 @@ index() {
     echo
     sed -e 's|](docs/running.md)|](running.html)|g' \
         -e 's|](docs/developers.md)|](developers.html)|g' \
+        -e 's|from the project homepage|from the bottom of this page|g' \
         README.md | awk '
           BEGIN { state = 0 }
           state == 0 && /^#/ { state = 1; next }
