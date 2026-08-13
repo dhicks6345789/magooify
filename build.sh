@@ -130,14 +130,46 @@ index() {
   rm -rf "$HUGO_SITE/public"
   mkdir -p "$HUGO_SITE/content"
 
+  # Extract the first paragraph (everything between the first H1 and the next blank line),
+  # to surface as the page's tagline above the documentation body.
+  FIRST_PARA=$(awk '
+    BEGIN { state = 0; para = "" }
+    state == 0 && /^#/ { state = 1; next }
+    state == 1 { if (/^$/) state = 2; next }
+    state == 2 {
+      if (/^$/ || /^#/) { state = 3; next }
+      para = (para == "" ? $0 : para " " $0)
+      next
+    }
+    state == 3 { if (/^$/) state = 4; next }
+    END { if (para != "") print para }
+  ' README.md)
+
   {
     echo "---"
     echo 'title: "Magooify"'
+    if [ -n "$FIRST_PARA" ]; then
+      echo "summary: |"
+      printf '%s\n' "$FIRST_PARA" | sed 's/^/  /'
+    fi
     echo "---"
     echo
     sed -e 's|](docs/running.md)|](running.html)|g' \
         -e 's|](docs/developers.md)|](developers.html)|g' \
-        README.md
+        README.md | awk '
+          BEGIN { state = 0 }
+          state == 0 && /^#/ { state = 1; next }
+          state == 1 { if (/^$/) state = 2; next }
+          state == 2 {
+            if (/^$/ || /^#/) { state = 3; next }
+            next
+          }
+          state == 3 {
+            if (/^$/) { state = 4; next }
+            print; state = 4; next
+          }
+          state == 4 { print }
+        '
   } > "$HUGO_SITE/content/_index.md"
 
   {
