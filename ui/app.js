@@ -214,14 +214,23 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function checkConnection() {
+    // The connection indicator's baseline state is shown only when the
+    // server isn't in demo mode. In demo mode the same connBadge element
+    // becomes the yellow "Demo mode" badge (set up by
+    // applyDemoModeChrome from /api/v1/info), so checkConnection leaves
+    // it untouched and reports the connectivity state in the UI's status
+    // area instead.
+    if (isDemoMode) {
+      return;
+    }
     fetchJSON('api/v1/health')
       .then(() => {
-        connBadge.classList.remove('text-bg-danger');
+        connBadge.classList.remove('text-bg-danger', 'text-bg-warning');
         connBadge.classList.add('text-bg-success');
         connBadge.textContent = 'connected';
       })
       .catch(() => {
-        connBadge.classList.remove('text-bg-success');
+        connBadge.classList.remove('text-bg-success', 'text-bg-warning');
         connBadge.classList.add('text-bg-danger');
         connBadge.textContent = 'offline';
       });
@@ -386,8 +395,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // applyDemoModeChrome surfaces the server's demo state in the UI so the
   // visitor knows the controls they see are visual only. It pins the
   // prompt textarea to the demo message (so the user can't accidentally try
-  // to make it mean something actionable) and surfaces a small badge in the
-  // top bar.
+  // to make it mean something actionable) and re-paints the existing
+  // #conn-badge in the top bar as a yellow "Demo mode" badge instead of
+  // leaving it on the green "connected" indicator.
   function applyDemoModeChrome() {
     if (!isDemoMode) {
       return;
@@ -400,17 +410,14 @@ document.addEventListener('DOMContentLoaded', () => {
       basePrompt = DEMO_PROMPT;
       refreshPromptPreview();
     }
-    // A short label in the top bar so the mode is unmistakable.
-    if (!document.getElementById('demo-badge')) {
-      const badge = document.createElement('span');
-      badge.id = 'demo-badge';
-      badge.className = 'badge rounded-pill text-bg-warning ms-1';
-      badge.textContent = 'Demo mode';
-      badge.title = 'Started with -demo: writes to the output folder are blocked by the backend.';
-      const navbar = document.querySelector('.navbar .d-flex.align-items-center.gap-2');
-      if (navbar) {
-        navbar.insertBefore(badge, navbar.firstChild);
-      }
+    // Repurpose the existing connection indicator as the demo badge so the
+    // navbar shows one status pill rather than two (green + yellow stacked).
+    if (connBadge) {
+      connBadge.classList.remove('text-bg-success', 'text-bg-danger');
+      connBadge.classList.add('text-bg-warning');
+      connBadge.textContent = 'Demo mode';
+      connBadge.title =
+        'Started with -demo: writes to the output folder are blocked by the backend.';
     }
   }
 
