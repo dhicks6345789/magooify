@@ -64,6 +64,21 @@ document.addEventListener('DOMContentLoaded', () => {
   // as soon as the response arrives.
   let openrouterConfigured = true;
 
+  // isDemoMode mirrors the is_demo flag reported by /api/v1/info and is true
+  // when the executable was started with -demo. In demo mode the backend
+  // refuses to write processed images, so the frontend short-circuits the
+  // Process button, leaves the Edit prompt section visible (with a fixed
+  // demo message) and overlays an unmistakable "Demo mode" badge on the
+  // top bar. Without this state the UI would either confuse visitors with
+  // a half-working flow or, worse, send images to the server only for the
+  // backend to bounce them.
+  let isDemoMode = false;
+
+  // DemoPrompt is the literal text shown in the prompt editor whenever the
+  // server is running in demo mode. It is intentionally fixed so visitors
+  // can't be tricked into editing it into something actionable.
+  const DEMO_PROMPT = 'Demo mode only - no actual processing will be done here.';
+
   const fileInput = document.getElementById('file-input');
   const previewWrap = document.getElementById('preview-wrap');
   const preview = document.getElementById('preview');
@@ -213,12 +228,29 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function loadPrompt() {
+    // The actual prompt is irrelevant in demo mode (nothing listens for it),
+    // but it's still useful as the baseline for palette composition in the
+    // rendered preview, so we always end up calling refreshPromptPreview.
+    const applyBase = (rawPrompt) => {
+      if (isDemoMode) {
+        basePrompt = DEMO_PROMPT;
+      } else {
+        basePrompt = (rawPrompt || '').trim();
+      }
+      refreshPromptPreview();
+    };
+
+    if (isDemoMode) {
+      applyBase('');
+      return;
+    }
     fetchJSON('api/v1/prompt')
-      .then((data) => {
-        basePrompt = (data.prompt || '').trim();
-        refreshPromptPreview();
-      })
-      .catch(() => {});
+      .then((data) => applyBase(data.prompt))
+      .catch(() => {
+        // Even on failure we still want a baseline so the editor isn't empty
+        // when the prompt would have been applied.
+        applyBase('');
+      });
   }
 
   // Group palettes by brand for the dropdown so it's easy to find the entry a
@@ -325,22 +357,61 @@ document.addEventListener('DOMContentLoaded', () => {
       .then((data) => {
         currentModelId = data.model || null;
         openrouterConfigured = data.openrouter_configured === true;
+        isDemoMode = data.is_demo === true;
         applyFeatureVisibility();
+        applyDemoModeChrome();
       })
       .catch(() => {});
   }
 
-  // applyFeatureVisibility shows or hides the AI-only controls - the prompt
-  // editor, the Models picker and the credit balance - based on whether the
-  // OpenRouter API key has been configured. The Vectorise switch stays
-  // interactive in both modes so the user can pick between just scanning the
-  // bitmap and tracing it into an SVG.
+  // applyFeatureVisibility shows or hides the AI-only controls based on the
+  // OpenRouter key and demo-mode flags. Elements marked data-feature="openrouter"
+  // (Models picker, credit balance) appear only when OpenRouter is configured;
+  // elements marked data-feature="ai-or-demo" (the Edit prompt section) appear
+  // whenever OpenRouter is configured OR the server is in demo mode - demo
+  // visitors still need to see the prompt editor so they understand that
+  // nothing they enter will be sent anywhere. The Vectorise switch stays
+  // interactive in every mode.
   function applyFeatureVisibility() {
     document.querySelectorAll('[data-feature="openrouter"]').forEach((el) => {
       el.classList.toggle('d-none', !openrouterConfigured);
     });
+    document.querySelectorAll('[data-feature="ai-or-demo"]').forEach((el) => {
+      el.classList.toggle('d-none', !openrouterConfigured && !isDemoMode);
+    });
     refreshPromptPreview();
     refreshPaletteHint();
+  }
+
+  // applyDemoModeChrome surfaces the server's demo state in the UI so the
+  // visitor knows the controls they see are visual only. It pins the
+  // prompt textarea to the demo message (so the user can't accidentally try
+  // to make it mean something actionable) and surfaces a small badge in the
+  // top bar.
+  function applyDemoModeChrome() {
+    if (!isDemoMode) {
+      return;
+    }
+    if (promptText && promptText.value !== DEMO_PROMPT) {
+      promptText.value = DEMO_PROMPT;
+      // Force the rendered preview to be the demo message with palette
+      // line appended when a palette is selected, matching how a real prompt
+      // would render.
+      basePrompt = DEMO_PROMPT;
+      refreshPromptPreview();
+    }
+    // A short label in the top bar so the mode is unmistakable.
+    if (!document.getElementById('demo-badge')) {
+      const badge = document.createElement('span');
+      badge.id = 'demo-badge';
+      badge.className = 'badge rounded-pill text-bg-warning ms-1';
+      badge.textContent = 'Demo mode';
+      badge.title = 'Started with -demo: writes to the output folder are blocked by the backend.';
+      const navbar = document.querySelector('.navbar .d-flex.align-items-center.gap-2');
+      if (navbar) {
+        navbar.insertBefore(badge, navbar.firstChild);
+      }
+    }
   }
 
   async function loadModels() {
@@ -942,6 +1013,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnProcess.addEventListener('click', async () => {
     if (!currentBlob) return;
+
+    if (isDemoMode) {
+      // Demo mode: the backend would just bounce the request with a stub
+      // response, so don't even POST. Surface an explicit message so the
+      // visitor understands why nothing happened, and reuse the stubbed
+      // response shape from the backend for the result card.
+      processStatus.textContent =
+        'Demo mode: image not sent to the backend. No file is saved.';
+      resultImage.removeAttribute('src');
+      resultImage.removeAttribute('class');
+      resultImage.alt = 'Demo mode preview';
+      resultDownload.removeAttribute('href');
+      resultDownload.removeAttribute('download');
+      resultDownloadLabel.textContent = 'Demo mode - no download';
+      resultModel.textContent = '';
+      resultTime.textContent = '';
+      resultCard.classList.remove('d-none');
+      resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
     setProcessing(true);
     processStatus.textContent = processStatusText('start');
     try {

@@ -135,6 +135,12 @@ type SystemInfoResponse struct {
 	// supplied via -openrouter-key. When false the application can only run
 	// the local vectorisation pipeline and the UI hides AI-only controls.
 	OpenRouterConfigured bool `json:"openrouter_configured" example:"true"`
+	// IsDemo reports whether the application was started with the -demo
+	// flag. In demo mode every write path is disabled so a public demo
+	// cannot litter the configured output directory with arbitrary
+	// images; the UI surfaces this so the user understands the controls
+	// are visual only.
+	IsDemo bool `json:"is_demo" example:"false"`
 }
 
 // ItemsResponse is the payload returned when listing items.
@@ -249,6 +255,10 @@ var proxyHeaders = []string{
 type api struct {
 	startTime         time.Time
 	isServerMode      bool
+	// IsDemo disables every write path so a public demo cannot litter
+	// the configured output dir with arbitrary images. Set after
+	// construction from the -demo command-line flag.
+	isDemo            bool
 	items             []Item
 	nextID            int
 	mu                sync.RWMutex
@@ -365,10 +375,21 @@ func (a *api) user(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(a.getUser(r))
 }
 
+// IsDemoConfigured reports whether the IsDemo field on this api instance is
+// true. Exported helpers like storeResult check this rather than reading
+// IsDemo directly so a future demo configuration that combines multiple
+// flags can update both consistently.
+func (a *api) IsDemoConfigured() bool {
+	return a.isDemo
+}
+
 // info returns system information such as mode, Go version, OS/Arch and uptime.
 // @Summary System Info
 // @Description Returns system metrics, Go version, OS/Arch, uptime, the configured
-// @Description model, and whether the OpenRouter API key has been configured.
+// @Description model, whether the OpenRouter API key has been configured, and
+// @Description whether the application was started with the -demo flag (in which
+// @Description case all write paths are disabled to keep a public demo free
+// @Description of unauthorised writes to the output directory).
 // @Produce json
 // @Success 200 {object} SystemInfoResponse
 // @Router /api/v1/info [get]
@@ -380,13 +401,14 @@ func (a *api) info(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
-		"mode":                 mode,
-		"go_version":           runtime.Version(),
-		"os":                   runtime.GOOS,
-		"arch":                 runtime.GOARCH,
-		"uptime":               time.Since(a.startTime).Truncate(time.Second).String(),
-		"model":                a.model,
-		"openrouter_configured": a.openRouterKey != "",
+		"mode":                   mode,
+		"go_version":             runtime.Version(),
+		"os":                     runtime.GOOS,
+		"arch":                   runtime.GOARCH,
+		"uptime":                 time.Since(a.startTime).Truncate(time.Second).String(),
+		"model":                  a.model,
+		"openrouter_configured":  a.openRouterKey != "",
+		"is_demo":                a.isDemo,
 	})
 }
 
@@ -910,6 +932,28 @@ type imagePayload struct {
 // @Failure 502 {object} ErrorResponse
 // @Router /api/v1/process [post]
 func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
+	// In demo mode we accept the request so the UI flow is exercised end to
+	// end (multipart parsing, palette lookup, etc.), but we short-circuit
+	// before any AI call or file write. The frontend knows about demo mode
+	// and normally does not even POST, so this branch is a safety net for
+	// direct API consumers.
+	if a.isDemo {
+		if _, err := readImagePayload(r); err != nil {
+			a.jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ProcessImageResponse{
+			Filename:    "",
+			Model:       "",
+			ProcessedAt: time.Now().UTC(),
+			Cost:        0,
+			SessionCost: 0,
+			Vectorised:  false,
+		})
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxImageUploadBytes)
 
 	pl, err := readImagePayload(r)
@@ -1385,8 +1429,13 @@ func decodeDataURL(s string) ([]byte, bool) {
 // extension that does not fit the bytes (for example a .jpg name for SVG
 // output after toggling vectorisation), the same base name is used with the
 // correct extension and the stale file left over from the previous extension
-// is removed first.
+// is removed first. In demo mode (set with -demo) the write is refused so
+// a public demo cannot litter the configured output directory with
+// arbitrary images regardless of where the request came from.
 func (a *api) storeResult(img []byte, output string) (string, error) {
+	if a.isDemo {
+		return "", errors.New("demo mode: writing processed images to the output directory is disabled")
+	}
 	if err := os.MkdirAll(a.outputDir, 0o755); err != nil {
 		return "", err
 	}

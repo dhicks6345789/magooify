@@ -98,7 +98,7 @@
         },
         "/api/v1/info": {
             "get": {
-                "description": "Returns system metrics, Go version, OS/Arch, uptime, the configured\nmodel, and whether the OpenRouter API key has been configured.",
+                "description": "Returns system metrics, Go version, OS/Arch, uptime, the configured\nmodel, whether the OpenRouter API key has been configured, and\nwhether the application was started with the -demo flag (in which\ncase all write paths are disabled to keep a public demo free\nof unauthorised writes to the output directory).",
                 "produces": [
                     "application/json"
                 ],
@@ -591,6 +591,11 @@
                 "go_version": {
                     "type": "string",
                     "example": "go1.24.4"
+                },
+                "is_demo": {
+                    "description": "IsDemo reports whether the application was started with the -demo\nflag. In demo mode every write path is disabled so a public demo\ncannot litter the configured output directory with arbitrary\nimages; the UI surfaces this so the user understands the controls\nare visual only.",
+                    "type": "boolean",
+                    "example": false
                 },
                 "mode": {
                     "type": "string",

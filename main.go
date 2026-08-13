@@ -827,6 +827,7 @@ func main() {
 	outputDir := flag.String("output-dir", getEnv("OUTPUT_DIR", defaultOutputDir), "Directory where processed images and their descriptions are stored")
 	model := flag.String("model", getEnv("OPENROUTER_MODEL", defaultModel), "OpenRouter model used to process images")
 	promptFile := flag.String("prompt-file", getEnv("PROMPT_FILE", ""), "Path to a file whose text is sent to the model with each image, instead of the embedded PROMPT.md")
+	demo := flag.Bool("demo", false, "Run in demo mode: writes to the output directory are blocked and the UI shows a 'Demo mode only - no actual processing will be done here.' banner in the prompt editor so visitors can explore the controls without being able to store images on the server")
 	flag.Parse()
 
 	// Offline documentation generation (used by the build script to produce docs/api.html).
@@ -878,6 +879,7 @@ func main() {
 	a.outputDir = *outputDir
 	a.model = *model
 	a.promptFile = *promptFile
+	a.isDemo = *demo
 
 	handler := buildHandler(a, basePaths)
 
@@ -897,6 +899,9 @@ func main() {
 		log.Printf("Credits   : management key configured (use -openrouter-management-key to change)")
 	} else {
 		log.Printf("Credits   : NOT configured (use -openrouter-management-key)")
+	}
+	if a.isDemo {
+		log.Printf("Demo mode : ENABLED (writes to %s are blocked)", a.outputDir)
 	}
 	log.Printf("Output dir: %s", a.outputDir)
 	if a.promptFile != "" {

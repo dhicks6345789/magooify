@@ -98,6 +98,104 @@ func TestDefaultOutputDir(t *testing.T) {
 	}
 }
 
+func TestInfoEndpointReportsDemoMode(t *testing.T) {
+	a := newAPI(false, docsFS)
+	req := httptest.NewRequest("GET", "/api/v1/info", nil)
+	rr := httptest.NewRecorder()
+	a.info(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if got, _ := resp["is_demo"].(bool); got {
+		t.Errorf("is_demo = true, want false when -demo is not set")
+	}
+
+	// When the -demo flag is set, /api/v1/info must report it.
+	a.isDemo = true
+	rr = httptest.NewRecorder()
+	a.info(rr, req)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if got, _ := resp["is_demo"].(bool); !got {
+		t.Errorf("is_demo = false, want true when -demo is set")
+	}
+}
+
+func TestProcessImageDemoModeShortCircuits(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+	a.isDemo = true
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(miniPNG)
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp.Filename != "" {
+		t.Errorf("filename = %q, want empty in demo mode (no file written)", resp.Filename)
+	}
+	if resp.Cost != 0 || resp.SessionCost != 0 {
+		t.Errorf("cost = %v / session_cost = %v, want both zero in demo mode", resp.Cost, resp.SessionCost)
+	}
+	if resp.Model != "" {
+		t.Errorf("model = %q, want empty in demo mode", resp.Model)
+	}
+
+	entries, err := os.ReadDir(a.outputDir)
+	if err != nil {
+		t.Fatalf("failed to read output dir: %v", err)
+	}
+	if len(entries) != 0 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected nothing stored in demo mode, found %d files: %v", len(entries), names)
+	}
+}
+
+func TestStoreResultRejectsInDemoMode(t *testing.T) {
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+	a.isDemo = true
+
+	_, err := a.storeResult(miniPNG, "")
+	if err == nil {
+		t.Fatal("storeResult returned nil error in demo mode, expected error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "demo") {
+		t.Errorf("error = %q, want one mentioning demo mode", err.Error())
+	}
+
+	// The directory must still be empty: the rejection is the second line
+	// of defence, not the first.
+	entries, _ := os.ReadDir(a.outputDir)
+	if len(entries) != 0 {
+		t.Errorf("expected nothing stored in demo mode, found %d files", len(entries))
+	}
+}
+
 func TestUserEndpointDesktop(t *testing.T) {
 	t.Setenv("USER", "tester")
 	a := newAPI(false, docsFS)
