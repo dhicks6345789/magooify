@@ -2,6 +2,8 @@
 
 Turn your quick, roughly-sketched pen-and-ink black-line style cartoons into clean, scaleable images with smooth lines and consistent colours.
 
+You can try a [live demo](https://www.sansay.co.uk/magooify/demo/) right now.
+
 ## Features
 
 - **Image Capture**: Take photos from your device (laptop, desktop, phone or tablet), scan from a [desktop visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser), or simply upload an image.
@@ -15,7 +17,7 @@ Turn your quick, roughly-sketched pen-and-ink black-line style cartoons into cle
 
 ## How To Use
 
-This application is designed to process quick, roughly-sketched pen-and-ink black-line style cartoons into clean, scaleable images with smooth lines and consistent colours. It's a workflow tool designed with beginners in mind, capable of bulk processing images, and can write processed images to a shared cloud storage location - perfect for school art classes.
+This application is designed to process quick, roughly-sketched pen-and-ink black-line style cartoons into clean, scaleable images with smooth lines and consistent colours. It's a workflow tool designed with beginners in mind, capable of bulk processing images, and can write processed images to a shared cloud storage location - perfect for busy school art classes.
 
 The first thing you will see is an option to either take a photo or upload an image. If you are on a phone or tablet you can simply take a photo of the cartoon you want to use. On a laptop or desktop machine, a [desktop USB visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser) is probably your best option.
 
@@ -25,9 +27,11 @@ Select the "Vectorise" option if you want your output to be an SVG image, scalea
 
 ## Running
 
-You can use Magooify right away by simply downloading and running the executable for your platform from the project homepage. Simply run the executable, in desktop mode it should open your local web browser and display the user interface.
+You can try out Magooify on the [live demo](https://www.sansay.co.uk/magooify/demo/) page.
 
-To use the AI image processing feature, you will need to provide an OpenRouter API key. Without one, the app still works: the prompt editing option is hidden and the captured image is never sent to OpenRouter. The **Convert result to SVG** switch is the only thing that produces SVG output - either via AI processing (which also runs the local trace) or via the embedded local vectoriser - and you can keep it off to simply scan bitmaps.
+You can run Magooify on your own system by simply downloading and running the executable for your platform from the project homepage. Simply run the executable, in desktop mode it should open your local web browser and display the user interface.
+
+To use the AI image processing feature, you will need to provide an OpenRouter API key. Without one, the app still works: the prompt editing option is hidden and the captured image is never sent to an AI processing engine, Magooify just acts as a handy image-capture utility.
 
 For more details, or if you are a system administrator wanting to run this application centrally for access by multiple users, see the [documentation](docs/running.md).
 
