@@ -189,12 +189,24 @@ index() {
     cat docs/developers.md
   } > "$HUGO_SITE/content/developers.md"
 
+  {
+    echo "---"
+    echo 'title: "License"'
+    echo "---"
+    echo
+    echo '```'
+    cat LICENSE
+    echo
+    echo '```'
+  } > "$HUGO_SITE/content/license.md"
+
   write_downloads_data
   hugo --source "$HUGO_SITE" --destination public
   cp "$HUGO_SITE/public/index.html" ./index.html
   cp "$HUGO_SITE/public/running.html" ./running.html
   cp "$HUGO_SITE/public/developers.html" ./developers.html
-  echo "==> Generated: ./index.html, ./running.html, ./developers.html"
+  cp "$HUGO_SITE/public/license.html" ./license.html
+  echo "==> Generated: ./index.html, ./running.html, ./developers.html, ./license.html"
 }
 
 dist() {
@@ -229,6 +241,7 @@ dist() {
   cp index.html "$dest/"
   [ -f running.html ] && cp running.html "$dest/"
   [ -f developers.html ] && cp developers.html "$dest/"
+  [ -f license.html ] && cp license.html "$dest/"
   cp "$UI_DIR/logo.svg" "$dest/"
   cp -r docs/* "$dest/docs/"
   cp dist/* "$dest/"
