@@ -166,6 +166,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // it so the whole image is seen rather than only its top-left corner.
   const MAX_DIM = 1024;
 
+  // Each click on a rotate button nudges the captured image by this many
+  // degrees. Small steps let the user fine-tune the orientation in the
+  // browser before processing it; clicking the same button repeatedly
+  // accumulates to larger angles.
+  const ROTATE_DEG = 5;
+
   let cameraStream = null;
   let currentBlob = null;
   let currentName = '';
@@ -797,26 +803,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // rotateImage turns the captured image 90 degrees in the given direction
-  // ('cw' or 'ccw') and returns the result as a JPEG blob. Rotation swaps
-  // the width and height, so the next setImage call picks up the new natural
-  // dimensions automatically.
-  async function rotateImage(blob, direction) {
+  // rotateImage turns the captured image by the given number of degrees
+  // (positive is clockwise in canvas coordinates, negative is
+  // anti-clockwise) and returns the result as a JPEG blob. The canvas is
+  // sized large enough to hold the rotated image's bounding rectangle and
+  // the image is drawn centred so successive small rotations accumulate
+  // cleanly without drifting to one side.
+  async function rotateImage(blob, degrees) {
     const img = await loadImageBlob(blob);
     const w = img.naturalWidth;
     const h = img.naturalHeight;
+    const rad = degrees * Math.PI / 180;
+    const absSin = Math.abs(Math.sin(rad));
+    const absCos = Math.abs(Math.cos(rad));
     const canvas = document.createElement('canvas');
-    canvas.width = h;
-    canvas.height = w;
+    canvas.width = Math.max(1, Math.round(w * absCos + h * absSin));
+    canvas.height = Math.max(1, Math.round(w * absSin + h * absCos));
     const ctx = canvas.getContext('2d');
-    if (direction === 'cw') {
-      ctx.translate(canvas.width, 0);
-      ctx.rotate(Math.PI / 2);
-    } else {
-      ctx.translate(0, canvas.height);
-      ctx.rotate(-Math.PI / 2);
-    }
-    ctx.drawImage(img, 0, 0);
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(img, -w / 2, -h / 2);
     return canvasToBlob(canvas);
   }
 
@@ -856,11 +862,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   btnRotateLeft.addEventListener('click', () => {
-    applyTransform((blob) => rotateImage(blob, 'ccw'));
+    applyTransform((blob) => rotateImage(blob, -ROTATE_DEG));
   });
 
   btnRotateRight.addEventListener('click', () => {
-    applyTransform((blob) => rotateImage(blob, 'cw'));
+    applyTransform((blob) => rotateImage(blob, ROTATE_DEG));
   });
 
   btnMirrorVertical.addEventListener('click', () => {
