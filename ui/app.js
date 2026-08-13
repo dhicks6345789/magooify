@@ -172,6 +172,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // accumulates to larger angles.
   const ROTATE_DEG = 5;
 
+  // The transform buttons keep the rotated / mirrored content the same
+  // size as the captured image, so successive rotations don't let the
+  // canvas grow on top of the underlying picture. The original (capture /
+  // upload) dimensions are preserved as a reference, and cumulativeRotation
+  // keeps track of how many degrees of net rotation the user has applied
+  // since the image was loaded - both reset whenever a new image lands.
+  let originalWidth = 0;
+  let originalHeight = 0;
+  let cumulativeRotation = 0;
+
   let cameraStream = null;
   let currentBlob = null;
   let currentName = '';
@@ -491,6 +501,19 @@ document.addEventListener('DOMContentLoaded', () => {
   cameraModal.addEventListener('shown.bs.modal', startCamera);
   cameraModal.addEventListener('hidden.bs.modal', stopCamera);
 
+  // recordFreshImage captures the natural dimensions of a brand-new image
+  // (capture / upload / drop, not a transform output) so subsequent rotate
+  // clicks can compute the correct bounded canvas size. Called whenever the
+  // user provides a new image; transforms deliberately skip it so their own
+  // successive clicks remain relative to the fresh reference.
+  function recordFreshImage(blob) {
+    return loadImageBlob(blob).then((img) => {
+      originalWidth = img.naturalWidth;
+      originalHeight = img.naturalHeight;
+      cumulativeRotation = 0;
+    });
+  }
+
   btnCapture.addEventListener('click', () => {
     if (!cameraStream || cameraVideo.videoWidth === 0) return;
     const canvas = document.createElement('canvas');
@@ -499,7 +522,9 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas.getContext('2d').drawImage(cameraVideo, 0, 0);
     canvas.toBlob(
       (blob) => {
-        if (blob) setImage(blob, 'camera-capture.jpg');
+        if (!blob) return;
+        setImage(blob, 'camera-capture.jpg');
+        recordFreshImage(blob).catch(() => {});
       },
       'image/jpeg',
       0.92
@@ -530,7 +555,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const file = e.dataTransfer.files[0];
     if (!file) return;
     downscaleImage(file)
-      .then((blob) => setImage(blob, file.name))
+      .then(async (blob) => {
+        setImage(blob, file.name);
+        try {
+          await recordFreshImage(blob);
+        } catch (e) {
+          // No fresh dims available - rotation will fall back to input dims.
+        }
+      })
       .catch((err) => {
         processStatus.textContent = 'Could not read image: ' + err.message;
       });
@@ -540,7 +572,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const file = fileInput.files[0];
     if (!file) return;
     downscaleImage(file)
-      .then((blob) => setImage(blob, file.name))
+      .then(async (blob) => {
+        setImage(blob, file.name);
+        try {
+          await recordFreshImage(blob);
+        } catch (e) {
+          // No fresh dims available - rotation will fall back to input dims.
+        }
+      })
       .catch((err) => {
         processStatus.textContent = 'Could not read image: ' + err.message;
       });
@@ -806,23 +845,47 @@ document.addEventListener('DOMContentLoaded', () => {
   // rotateImage turns the captured image by the given number of degrees
   // (positive is clockwise in canvas coordinates, negative is
   // anti-clockwise) and returns the result as a JPEG blob. The canvas is
-  // sized large enough to hold the rotated image's bounding rectangle and
-  // the image is drawn centred so successive small rotations accumulate
-  // cleanly without drifting to one side.
+  // sized to the rotated content's TRUE bounding rectangle based on the
+  // original (upload / capture) image dimensions and the cumulative
+  // rotation angle, so the canvas dims cycle as the user rotates instead of
+  // monotonically growing on every click. A white pre-fill keeps any
+  // sub-pixel padding from rendering as opaque black in JPEG.
   async function rotateImage(blob, degrees) {
+    if (originalWidth <= 0 || originalHeight <= 0) {
+      // No fresh image has been recorded yet - fall back to whatever the
+      // current blob says so the click still does something visible.
+      const temp = await loadImageBlob(blob);
+      originalWidth = temp.naturalWidth;
+      originalHeight = temp.naturalHeight;
+    }
+    // Update cumulative rotation (signed, in degrees). Wraps modulo 360.
+    cumulativeRotation = ((cumulativeRotation + degrees) % 360 + 360) % 360;
+
     const img = await loadImageBlob(blob);
-    const w = img.naturalWidth;
-    const h = img.naturalHeight;
-    const rad = degrees * Math.PI / 180;
+    const imgW = img.naturalWidth;
+    const imgH = img.naturalHeight;
+
+    // Compute canvas size from ORIGINAL dims and cumulative rotation, so
+    // successive rotations cycle (e.g. 100x100 -> 109 -> ... -> 142 ->
+    // ... -> 100) instead of accumulating an ever-larger frame.
+    const rad = cumulativeRotation * Math.PI / 180;
     const absSin = Math.abs(Math.sin(rad));
     const absCos = Math.abs(Math.cos(rad));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(w * absCos + h * absSin));
-    canvas.height = Math.max(1, Math.round(w * absSin + h * absCos));
+    canvas.width = Math.max(2, Math.ceil(originalWidth * absCos + originalHeight * absSin));
+    canvas.height = Math.max(2, Math.ceil(originalWidth * absSin + originalHeight * absCos));
+
     const ctx = canvas.getContext('2d');
+    // White pre-fill so any sub-pixel transparent corners encode as
+    // white in JPEG, rather than opaque black that would shrink the
+    // visible image content relative to the surrounding frame.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate(rad);
-    ctx.drawImage(img, -w / 2, -h / 2);
+    ctx.rotate(degrees * Math.PI / 180);
+    ctx.drawImage(img, -imgW / 2, -imgH / 2);
+
     return canvasToBlob(canvas);
   }
 
@@ -957,6 +1020,11 @@ document.addEventListener('DOMContentLoaded', () => {
     processStatus.textContent = '';
     setProcessing(false);
     setImageActionButtonsEnabled(false);
+    // Reset the rotate-tracking state so the next image is treated as
+    // a fresh starting point.
+    cumulativeRotation = 0;
+    originalWidth = 0;
+    originalHeight = 0;
     loadPrompt();
   });
 
