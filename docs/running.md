@@ -8,7 +8,7 @@ Simply download and run the executable for your platform from the [project homep
 ./magooify -openrouter-key=sk-or-v1-... -output-dir=~/magooify-images
 ```
 
-Without `-openrouter-key` the UI hides the prompt editor and the Models picker so the captured image is never sent to OpenRouter, but the rest of the controls stay fully interactive. The **Vectorise** switch can be toggled freely: when it is on the input image is traced into an SVG locally, and when it is off the bitmap is re-encoded as PNG and saved as-is - perfect for using the app purely as a scanner for paper-based artwork. Select a felt-tip palette to constrain the colours of a local vectorisation, and add `-openrouter-key` at any time to bring back the AI processing path.
+Without `-openrouter-key` the UI hides the prompt editor and the Models picker so the captured image is never sent to OpenRouter, but the rest of the controls stay fully interactive. The **Vectorise** switch is the single source of truth for SVG output: when it is on the input image is traced into an SVG locally, and when it is off the bitmap is re-encoded as PNG and saved as-is - perfect for using the app purely as a scanner for paper-based artwork. Selecting a palette restriction only takes effect when AI processing runs (the palette names are folded into the prompt) or when **Vectorise** is on (the local trace is quantised to the palette); otherwise it is silently ignored. Add `-openrouter-key` at any time to bring back the AI processing path.
 
 Optional flags:
 

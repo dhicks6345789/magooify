@@ -19,7 +19,7 @@ This application is designed to process quick, roughly-sketched pen-and-ink blac
 
 The first thing you will see is an option to either take a photo or upload an image. If you are on a phone or tablet you can simply take a photo of the cartoon you want to use. On a laptop or desktop machine, a [desktop USB visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser) is probably your best option.
 
-Next, select if you want to palette-lock to a known set of colours. A wide range of palettes from pen, pencil and crayon sets used in UK schools are included. Selecting a known colour palette will enable processing of your image to select consistent, smooth colours for coloured areas.
+Next, select if you want to palette-lock to a known set of colours. A wide range of palettes from pen, pencil and crayon sets used in UK schools are included. The palette is applied when AI processing runs (the model is told which colours to use) or when the **Convert result to SVG** option is on (the local trace is quantised to the palette); with either disabled, the palette choice is silently ignored.
 
 Select the "Vectorise" option if you want your output to be an SVG image, scaleable to fit any size and resolution of media - use your artwork in a book, on a t-shirt or a 96-sheet roadside billboard!
 
@@ -27,7 +27,7 @@ Select the "Vectorise" option if you want your output to be an SVG image, scalea
 
 You can use Magooify right away by simply downloading and running the executable for your platform from the project homepage. Simply run the executable, in desktop mode it should open your local web browser and display the user interface.
 
-To use the AI image processing feature, you will need to provide an OpenRouter API key. Without one, the app still works as a local vectoriser - the prompt editing option is hidden and the captured image is never sent to OpenRouter, only the local SVG trace runs.
+To use the AI image processing feature, you will need to provide an OpenRouter API key. Without one, the app still works: the prompt editing option is hidden and the captured image is never sent to OpenRouter. The **Convert result to SVG** switch is the only thing that produces SVG output - either via AI processing (which also runs the local trace) or via the embedded local vectoriser - and you can keep it off to simply scan bitmaps.
 
 For more details, or if you are a system administrator wanting to run this application centrally for access by multiple users, see the [documentation](docs/running.md).
 

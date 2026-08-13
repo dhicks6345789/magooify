@@ -115,6 +115,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const paletteCollapse = document.getElementById('palette-collapse');
   const paletteSelect = document.getElementById('sel-palette');
   const paletteSwatch = document.getElementById('palette-swatch');
+  const paletteHint = document.getElementById('palette-hint');
+
+  // refreshPaletteHint nudges the user when their palette selection will have
+  // no effect on the output: with no OpenRouter API key and Convert result to
+  // SVG off, the palette id is ignored entirely, so the captured bitmap is the
+  // same as the input. Keeping the hint contextual lets the palette feel
+  // "magical" only when it actually changes something.
+  function refreshPaletteHint() {
+    const ignored =
+      !openrouterConfigured && paletteCheck.checked && !vectoriseCheck.checked;
+    if (paletteHint) {
+      paletteHint.classList.toggle('d-none', !ignored);
+    }
+  }
 
   let palettes = [];
 
@@ -236,6 +250,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const shown = paletteCheck.checked;
     paletteCollapse.classList.toggle('show', shown);
     refreshPromptPreview();
+    refreshPaletteHint();
+  });
+
+  vectoriseCheck.addEventListener('change', () => {
+    refreshPaletteHint();
   });
 
   paletteSelect.addEventListener('change', () => {
@@ -294,6 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
       el.classList.toggle('d-none', !openrouterConfigured);
     });
     refreshPromptPreview();
+    refreshPaletteHint();
   }
 
   async function loadModels() {

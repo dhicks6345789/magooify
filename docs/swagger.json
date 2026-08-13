@@ -272,7 +272,7 @@
         },
         "/api/v1/process": {
             "post": {
-                "description": "Accepts an image captured by the camera or uploaded by the user. When an OpenRouter\nAPI key is configured the image is sent to the configured vision model for\nprocessing, then stored in the configured output directory. When no key is\nconfigured the AI step is skipped: the input image is stored as-is (so the app\ncan still be used as a simple bitmap scanner), or traced into an SVG locally if\nvectorise=true or a palette id is supplied.",
+                "description": "Accepts an image captured by the camera or uploaded by the user. When an OpenRouter\nAPI key is configured the image is sent to the configured vision model for\nprocessing, then stored in the configured output directory. When no key is\nconfigured the AI step is skipped: the input image is stored as-is (so the app\ncan still be used as a simple bitmap scanner), or traced into an SVG locally when\nvectorise=true.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -302,13 +302,13 @@
                     },
                     {
                         "type": "boolean",
-                        "description": "Trace the processed image into an SVG document (true/1/on/yes)",
+                        "description": "Trace the processed image into an SVG document (true/1/on/yes). This is the only flag that produces SVG output.",
                         "name": "vectorise",
                         "in": "formData"
                     },
                     {
                         "type": "string",
-                        "description": "Restrict the vectorised SVG to this palette ID (returned by /api/v1/palettes); implies vectorise",
+                        "description": "Restrict the colour palette: when vectorise=true it limits the SVG output to the named palette's colours; otherwise it is folded into the AI prompt passed to OpenRouter. Ignored when no OpenRouter key is configured and vectorise is not set.",
                         "name": "palette",
                         "in": "formData"
                     }

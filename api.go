@@ -886,21 +886,24 @@ type imagePayload struct {
 // and the resulting description on the file system. When no OpenRouter key
 // has been configured the AI step is skipped: the captured image is stored
 // directly (so the app can still be used to scan bitmap images), or traced
-// into an SVG locally if the request carried vectorise=true or a palette id.
+// into an SVG locally if the request carried vectorise=true. The vectorise
+// flag is the single source of truth for whether SVG output is produced - a
+// palette id only restricts the colours used during that local trace and is
+// otherwise passed to the AI prompt; it never silently toggles vectorise on.
 // @Summary Process an Image
 // @Description Accepts an image captured by the camera or uploaded by the user. When an OpenRouter
 // @Description API key is configured the image is sent to the configured vision model for
 // @Description processing, then stored in the configured output directory. When no key is
 // @Description configured the AI step is skipped: the input image is stored as-is (so the app
-// @Description can still be used as a simple bitmap scanner), or traced into an SVG locally if
-// @Description vectorise=true or a palette id is supplied.
+// @Description can still be used as a simple bitmap scanner), or traced into an SVG locally when
+// @Description vectorise=true.
 // @Accept mpfd
 // @Produce json
 // @Param image formData file true "Image to process"
 // @Param prompt formData string false "Prompt to send with the image; defaults to the configured prompt. Ignored when no OpenRouter key is configured."
 // @Param output formData string false "Optional filename to write the processed image to, replacing any existing file with that name"
-// @Param vectorise formData bool false "Trace the processed image into an SVG document (true/1/on/yes)"
-// @Param palette formData string false "Restrict the vectorised SVG to this palette ID (returned by /api/v1/palettes); implies vectorise"
+// @Param vectorise formData bool false "Trace the processed image into an SVG document (true/1/on/yes). This is the only flag that produces SVG output."
+// @Param palette formData string false "Restrict the colour palette: when vectorise=true it limits the SVG output to the named palette's colours; otherwise it is folded into the AI prompt passed to OpenRouter. Ignored when no OpenRouter key is configured and vectorise is not set."
 // @Success 200 {object} ProcessImageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 503 {object} ErrorResponse
@@ -929,10 +932,11 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 			a.jsonError(w, http.StatusBadRequest, "Unknown palette: "+pl.palette)
 			return
 		}
-		// A palette is only meaningful for the vectorised output; force
-		// vectorise on so the request is processed end-to-end even when no
-		// OpenRouter key is configured.
-		pl.vectorise = true
+		// Palette alone never forces vectorise - the user keeps full control of
+		// the Convert to SVG toggle. When vectorise=true the palette is applied
+		// to the local trace; when the AI step runs the palette names are
+		// folded into the prompt. Otherwise the palette flag is effectively a
+		// no-op (the bitmap is just stored unchanged).
 	}
 
 	var processed []byte

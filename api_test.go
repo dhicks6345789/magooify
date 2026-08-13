@@ -747,9 +747,12 @@ func TestProcessImageNoKeyStoresBitmap(t *testing.T) {
 	}
 }
 
-func TestProcessImageNoKeyPaletteImpliesVectorise(t *testing.T) {
-	// Supplying only a palette (no explicit vectorise flag) implicitly
-	// requests vectorisation and must also be served locally.
+func TestProcessImageNoKeyPaletteDoesNotForceVectorise(t *testing.T) {
+	// Palette alone must never toggle SVG output on. When the user leaves
+	// the Convert result to SVG switch off, a palette id is silently ignored
+	// and the bitmap is stored unchanged - mirroring the AI path where the
+	// palette only has an effect when an AI call is made or the vectoriser
+	// runs.
 	a := newAPI(false, docsFS)
 	a.outputDir = t.TempDir()
 
@@ -782,8 +785,55 @@ func TestProcessImageNoKeyPaletteImpliesVectorise(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	if !resp.Vectorised {
-		t.Errorf("Vectorised = false, want true when a palette is set without an AI key")
+	if resp.Vectorised {
+		t.Errorf("Vectorised = true, want false (palette alone must not flip the SVG toggle)")
+	}
+	if !strings.HasSuffix(resp.Filename, ".png") {
+		t.Errorf("filename = %q, want a .png name (no SVG output without vectorise)", resp.Filename)
+	}
+}
+
+func TestProcessImageNoKeyPaletteAndVectoriseUsePalette(t *testing.T) {
+	// When vectorise=true with a palette id and no AI key, the result is
+	// still an SVG, this time quantised to the named palette's colours.
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	src := pngOfColour(8, 8, func(x, y int) color.RGBA {
+		if x < 4 && y < 4 {
+			return color.RGBA{R: 0xEE, G: 0x10, B: 0x40, A: 0xFF}
+		}
+		if x >= 4 && y >= 4 {
+			return color.RGBA{R: 0x00, G: 0x66, B: 0xCC, A: 0xFF}
+		}
+		return color.RGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF}
+	})
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(src)
+	mw.WriteField("vectorise", "true")
+	mw.WriteField("palette", "crayola-4")
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Vectorised || !strings.HasSuffix(resp.Filename, ".svg") {
+		t.Errorf("Vectorised = %v, filename = %q, want SVG output when vectorise=true", resp.Vectorised, resp.Filename)
 	}
 }
 
