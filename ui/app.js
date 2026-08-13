@@ -146,6 +146,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const cropTip = document.getElementById('crop-tip');
   const btnClearCrop = document.getElementById('btn-clear-crop');
 
+  // Image-transform buttons appear under the crop-tip row. They let the user
+  // re-orient the captured image locally before processing - the rotation and
+  // mirror operations are pure canvas ops, so the captured image never leaves
+  // the browser. The buttons are wired up in the init block below.
+  const btnRotateLeft = document.getElementById('btn-rotate-left');
+  const btnMirrorVertical = document.getElementById('btn-mirror-vertical');
+  const btnMirrorHorizontal = document.getElementById('btn-mirror-horizontal');
+  const btnRotateRight = document.getElementById('btn-rotate-right');
+  const transformButtons = [btnRotateLeft, btnMirrorVertical, btnMirrorHorizontal, btnRotateRight];
+
   const cameraModal = document.getElementById('cameraModal');
   const cameraVideo = document.getElementById('camera-video');
   const cameraError = document.getElementById('camera-error');
@@ -158,6 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let cameraStream = null;
   let currentBlob = null;
+  let currentName = '';
   let cropRect = null;
   let lastOutputFile = null;
   let cameraDevices = [];
@@ -388,9 +399,20 @@ document.addEventListener('DOMContentLoaded', () => {
   modelsSearch.addEventListener('input', renderModels);
 
   function setProcessing(on) {
-    btnProcess.disabled = on || !currentBlob;
+    // Disable every image-affecting button while a Process request is in
+    // flight, mirroring how Process itself is gated, so an in-flight
+    // request doesn't see the underlying blob swapped out from under it.
+    setImageActionButtonsEnabled(!on && !!currentBlob);
     processSpinner.classList.toggle('d-none', !on);
     processLabel.textContent = on ? 'Processing...' : 'Process';
+  }
+
+  // setImageActionButtonsEnabled toggles Process, the four transform buttons
+  // and the camera / file / drop-zone-entry points in lock-step so the user
+  // can only act on the captured image when there is one.
+  function setImageActionButtonsEnabled(on) {
+    btnProcess.disabled = !on;
+    transformButtons.forEach((b) => { b.disabled = !on; });
   }
 
   async function populateCameraSelect() {
@@ -694,6 +716,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function setImage(blob, name) {
     currentBlob = blob;
+    // Transforms re-use the same setImage entry point without supplying a
+    // name; in that case keep the original file label so the status line
+    // (and the eventual processed filename) still describes where the
+    // image came from.
+    if (name !== undefined) {
+      currentName = name;
+    }
     cropRect = null;
     cropDrag = null;
     lastOutputFile = null;
@@ -701,8 +730,8 @@ document.addEventListener('DOMContentLoaded', () => {
     preview.src = URL.createObjectURL(blob);
     previewWrap.classList.remove('d-none');
     noImage.classList.add('d-none');
-    btnProcess.disabled = false;
-    processStatus.textContent = name;
+    setImageActionButtonsEnabled(true);
+    processStatus.textContent = currentName;
     renderCropBox();
     updateCropTip();
   }
@@ -735,6 +764,112 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     });
   }
+
+  // canvasToBlob encodes a canvas as JPEG, mirroring the encoding the rest of
+  // the app uses so the resulting blob is interchangeable with anything the
+  // capture / upload paths produce.
+  function canvasToBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('Failed to encode image'))),
+        'image/jpeg',
+        0.92
+      );
+    });
+  }
+
+  // loadImageBlob wraps the blob in an object URL and resolves with a loaded
+  // <img>. Doing this via <img> rather than createImageBitmap means SVG (and
+  // any other format the browser can render) is supported too.
+  function loadImageBlob(blob) {
+    const url = URL.createObjectURL(blob);
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to load image'));
+      };
+      img.src = url;
+    });
+  }
+
+  // rotateImage turns the captured image 90 degrees in the given direction
+  // ('cw' or 'ccw') and returns the result as a JPEG blob. Rotation swaps
+  // the width and height, so the next setImage call picks up the new natural
+  // dimensions automatically.
+  async function rotateImage(blob, direction) {
+    const img = await loadImageBlob(blob);
+    const w = img.naturalWidth;
+    const h = img.naturalHeight;
+    const canvas = document.createElement('canvas');
+    canvas.width = h;
+    canvas.height = w;
+    const ctx = canvas.getContext('2d');
+    if (direction === 'cw') {
+      ctx.translate(canvas.width, 0);
+      ctx.rotate(Math.PI / 2);
+    } else {
+      ctx.translate(0, canvas.height);
+      ctx.rotate(-Math.PI / 2);
+    }
+    ctx.drawImage(img, 0, 0);
+    return canvasToBlob(canvas);
+  }
+
+  // mirrorImage flips the captured image along the given axis: 'x' mirrors
+  // across a vertical line (left/right swap) and 'y' mirrors across a
+  // horizontal line (top/bottom swap). The canvas dimensions are unchanged.
+  async function mirrorImage(blob, axis) {
+    const img = await loadImageBlob(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (axis === 'x') {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    } else {
+      ctx.translate(0, canvas.height);
+      ctx.scale(1, -1);
+    }
+    ctx.drawImage(img, 0, 0);
+    return canvasToBlob(canvas);
+  }
+
+  // applyTransform runs a transform against a stable snapshot of the current
+  // blob so the rest of the UI sees a single consistent blob change even if
+  // another click happens mid-flight. On failure the blob is left untouched
+  // and the error surfaces in the status line.
+  async function applyTransform(transform) {
+    if (!currentBlob) return;
+    const snapshot = currentBlob;
+    try {
+      const next = await transform(snapshot);
+      setImage(next);
+    } catch (err) {
+      processStatus.textContent = 'Transform failed: ' + err.message;
+    }
+  }
+
+  btnRotateLeft.addEventListener('click', () => {
+    applyTransform((blob) => rotateImage(blob, 'ccw'));
+  });
+
+  btnRotateRight.addEventListener('click', () => {
+    applyTransform((blob) => rotateImage(blob, 'cw'));
+  });
+
+  btnMirrorVertical.addEventListener('click', () => {
+    applyTransform((blob) => mirrorImage(blob, 'x'));
+  });
+
+  btnMirrorHorizontal.addEventListener('click', () => {
+    applyTransform((blob) => mirrorImage(blob, 'y'));
+  });
 
   btnProcess.addEventListener('click', async () => {
     if (!currentBlob) return;
@@ -803,6 +938,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnReset.addEventListener('click', () => {
     currentBlob = null;
+    currentName = '';
     cropRect = null;
     cropDrag = null;
     lastOutputFile = null;
@@ -814,7 +950,7 @@ document.addEventListener('DOMContentLoaded', () => {
     resultImage.classList.remove('vector');
     processStatus.textContent = '';
     setProcessing(false);
-    btnProcess.disabled = true;
+    setImageActionButtonsEnabled(false);
     loadPrompt();
   });
 
