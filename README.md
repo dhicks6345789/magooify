@@ -35,4 +35,4 @@ For more details, or if you are a system administrator wanting to run this appli
 
 If you want to use, customise or extend this project - for use by yourself, other users in your school / workplace, or even as a service you charge money for - you are very welcome to. See the [developer's documentation](docs/developers.md) for more details.
 
-This project is distributed under a permissive Apache 2.0 license.
+This project is distributed under a permissive [Apache 2.0 license](LICENSE) - you are allowed to freely use, modify, and distribute this project for both personal and commercial purposes without paying royalties.
