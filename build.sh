@@ -93,7 +93,7 @@ write_downloads_data() {
   : > "$out"
 
   local entries=(
-    "magooify-linux-amd64|Linux (x64)|🐧|64-bit Linux Desktop / Server|"
+    "magooify-linux-amd64|Linux (x64)|🐧|64-bit Linux Desktop / Server|logos/linux.svg"
     "magooify-windows-amd64.exe|Windows (x64)|🪟|64-bit Windows Desktop|logos/microsoft.svg"
     "magooify-darwin-amd64|macOS (Intel x64)|🍎|Intel-based Mac computers|logos/apple.svg"
     "magooify-darwin-arm64|macOS (Apple Silicon)|🍏|Apple M1 / M2 / M3 / M4 Macs|logos/apple.svg"
