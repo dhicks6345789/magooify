@@ -196,6 +196,7 @@ dist() {
   cp index.html "$dest/"
   [ -f running.html ] && cp running.html "$dest/"
   [ -f developers.html ] && cp developers.html "$dest/"
+  cp "$UI_DIR/logo.svg" "$dest/"
   cp -r docs/* "$dest/docs/"
   cp dist/* "$dest/"
   echo "==> Distribution complete: $dest"
