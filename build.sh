@@ -93,17 +93,17 @@ write_downloads_data() {
   : > "$out"
 
   local entries=(
-    "magooify-linux-amd64|Linux (x64)|🐧|64-bit Linux Desktop / Server"
-    "magooify-windows-amd64.exe|Windows (x64)|🪟|64-bit Windows Desktop"
-    "magooify-darwin-amd64|macOS (Intel x64)|🍎|Intel-based Mac computers"
-    "magooify-darwin-arm64|macOS (Apple Silicon)|🍏|Apple M1 / M2 / M3 / M4 Macs"
-    "magooify-rpi-arm64|Raspberry Pi (ARM64)|🍓|Raspberry Pi 3/4/5 (64-bit OS)"
-    "magooify-rpi-armv7|Raspberry Pi (ARMv7 32-bit)|🍓|Raspberry Pi 2/3/4 (32-bit OS)"
+    "magooify-linux-amd64|Linux (x64)|🐧|64-bit Linux Desktop / Server|"
+    "magooify-windows-amd64.exe|Windows (x64)|🪟|64-bit Windows Desktop|logos/microsoft.svg"
+    "magooify-darwin-amd64|macOS (Intel x64)|🍎|Intel-based Mac computers|logos/apple.svg"
+    "magooify-darwin-arm64|macOS (Apple Silicon)|🍏|Apple M1 / M2 / M3 / M4 Macs|logos/apple.svg"
+    "magooify-rpi-arm64|Raspberry Pi (ARM64)|🍓|Raspberry Pi 3/4/5 (64-bit OS)|logos/raspberry-pi.svg"
+    "magooify-rpi-armv7|Raspberry Pi (ARMv7 32-bit)|🍓|Raspberry Pi 2/3/4 (32-bit OS)|logos/raspberry-pi.svg"
   )
 
-  local entry filename name icon desc size
+  local entry filename name icon desc size logo
   for entry in "${entries[@]}"; do
-    IFS='|' read -r filename name icon desc <<< "$entry"
+    IFS='|' read -r filename name icon desc logo <<< "$entry"
     size="Unavailable"
     if [ -f "$OUT_DIR/$filename" ]; then
       size=$(human_size "$OUT_DIR/$filename")
@@ -113,6 +113,7 @@ write_downloads_data() {
 name = "$name"
 filename = "$filename"
 icon = "$icon"
+logo = "$logo"
 desc = "$desc"
 size = "$size"
 
@@ -244,6 +245,10 @@ dist() {
   [ -f developers.html ] && cp developers.html "$dest/"
   [ -f license.html ] && cp license.html "$dest/"
   cp "$UI_DIR/logo.svg" "$dest/"
+  if [ -d "$UI_DIR/logos" ]; then
+    mkdir -p "$dest/logos"
+    cp "$UI_DIR/logos/"* "$dest/logos/" 2>/dev/null || true
+  fi
   cp -r docs/* "$dest/docs/"
   cp dist/* "$dest/"
   echo "==> Distribution complete: $dest"

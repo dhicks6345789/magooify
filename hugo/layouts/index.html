@@ -52,7 +52,8 @@
       transition: transform 0.2s ease, border-color 0.2s ease;
     }
     .download-card:hover { transform: translateY(-2px); border-color: var(--accent-color); }
-    .card-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .card-icon { font-size: 2rem; margin-bottom: 0.5rem; height: 3rem; display: flex; align-items: center; }
+    .card-icon img.brand-logo { height: 100%; width: auto; }
     .card-info h3 { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.25rem; }
     .card-info p { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.75rem; }
     .file-meta { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem; }
@@ -115,7 +116,9 @@
     <div class="downloads-grid">
       {{ range site.Data.downloads.downloads }}
       <div class="download-card">
-        <div class="card-icon">{{ .icon }}</div>
+        <div class="card-icon">
+          {{ if .logo }}<img src="{{ .logo }}" alt="{{ .name }}" class="brand-logo" />{{ else }}{{ .icon }}{{ end }}
+        </div>
         <div class="card-info">
           <h3>{{ .name }}</h3>
           <p>{{ .desc }}</p>
