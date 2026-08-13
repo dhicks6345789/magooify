@@ -272,7 +272,7 @@
         },
         "/api/v1/process": {
             "post": {
-                "description": "Accepts an image captured by the camera or uploaded by the user. When an OpenRouter\nAPI key is configured the image is sent to the configured vision model for\nprocessing, then stored in the configured output directory. When no key is\nconfigured only the local vectorisation pipeline is available: the request must\ncarry vectorise=true (or a palette id) so the input image is traced into SVG.",
+                "description": "Accepts an image captured by the camera or uploaded by the user. When an OpenRouter\nAPI key is configured the image is sent to the configured vision model for\nprocessing, then stored in the configured output directory. When no key is\nconfigured the AI step is skipped: the input image is stored as-is (so the app\ncan still be used as a simple bitmap scanner), or traced into an SVG locally if\nvectorise=true or a palette id is supplied.",
                 "consumes": [
                     "multipart/form-data"
                 ],

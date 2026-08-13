@@ -38,7 +38,7 @@ const (
 	openRouterCreditsURL     = "https://openrouter.ai/api/v1/credits"
 	modelsCacheTTL           = 30 * time.Minute
 	defaultModel             = "google/gemini-3.1-flash-lite-image"
-	defaultOutputDir         = "processed"
+	defaultOutputDir         = "magooify"
 	fallbackPrompt           = "Describe the image in detail, including any text, people, objects and how they are arranged. Be specific and thorough."
 	maxImageUploadBytes      = 25 << 20
 	maxOpenRouterBytes       = 25 << 20
@@ -884,15 +884,16 @@ type imagePayload struct {
 // processImage accepts an image (multipart upload or JSON base64/data URL),
 // sends it to an OpenRouter vision model for processing, and stores the image
 // and the resulting description on the file system. When no OpenRouter key
-// has been configured the AI step is skipped and only the local pipeline
-// (vectorising the input image into an SVG) is available; in that mode the
-// request must carry vectorise=true or a palette id so the work is meaningful.
+// has been configured the AI step is skipped: the captured image is stored
+// directly (so the app can still be used to scan bitmap images), or traced
+// into an SVG locally if the request carried vectorise=true or a palette id.
 // @Summary Process an Image
 // @Description Accepts an image captured by the camera or uploaded by the user. When an OpenRouter
 // @Description API key is configured the image is sent to the configured vision model for
 // @Description processing, then stored in the configured output directory. When no key is
-// @Description configured only the local vectorisation pipeline is available: the request must
-// @Description carry vectorise=true (or a palette id) so the input image is traced into SVG.
+// @Description configured the AI step is skipped: the input image is stored as-is (so the app
+// @Description can still be used as a simple bitmap scanner), or traced into an SVG locally if
+// @Description vectorise=true or a palette id is supplied.
 // @Accept mpfd
 // @Produce json
 // @Param image formData file true "Image to process"
@@ -928,6 +929,10 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 			a.jsonError(w, http.StatusBadRequest, "Unknown palette: "+pl.palette)
 			return
 		}
+		// A palette is only meaningful for the vectorised output; force
+		// vectorise on so the request is processed end-to-end even when no
+		// OpenRouter key is configured.
+		pl.vectorise = true
 	}
 
 	var processed []byte
@@ -955,17 +960,11 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		}
 		model = a.model
 	} else {
-		// No OpenRouter key: only the local vectorisation pipeline is available.
-		// Require vectorise or a palette so the request actually does something.
-		if !pl.vectorise && pl.palette == "" {
-			a.jsonError(w, http.StatusServiceUnavailable,
-				"No OpenRouter API key configured; only local vectorisation is available. Restart with -openrouter-key=<key> or enable vectorisation.")
-			return
-		}
-		// Skip the AI step entirely: the input image is the source the
-		// vectoriser traces.
+		// No OpenRouter key: skip the AI step entirely. The input image is
+		// the source for either vectorisation or a straight bitmap store,
+		// depending on whether the user asked for vectorise. Leaving
+		// vectorise=false means the app is being used to scan bitmap images.
 		processed = pl.img
-		pl.vectorise = true
 	}
 
 	if pl.vectorise {

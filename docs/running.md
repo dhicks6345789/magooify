@@ -8,15 +8,15 @@ Simply download and run the executable for your platform from the [project homep
 ./magooify -openrouter-key=sk-or-v1-... -output-dir=~/magooify-images
 ```
 
-Without `-openrouter-key` the application still works as a local vectoriser: the UI hides the prompt editor and the Models picker, and every Process request is served entirely inside the executable (the captured image is traced into an SVG without leaving the machine). The vectorise and palette controls stay available so you can still pick a felt-tip palette for the output, and the `-openrouter-key` flag can be added at any time to enable AI processing.
+Without `-openrouter-key` the UI hides the prompt editor and the Models picker so the captured image is never sent to OpenRouter, but the rest of the controls stay fully interactive. The **Vectorise** switch can be toggled freely: when it is on the input image is traced into an SVG locally, and when it is off the bitmap is re-encoded as PNG and saved as-is - perfect for using the app purely as a scanner for paper-based artwork. Select a felt-tip palette to constrain the colours of a local vectorisation, and add `-openrouter-key` at any time to bring back the AI processing path.
 
 Optional flags:
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the AI path is disabled in the UI and the image endpoint serves only the local vectorisation pipeline. |
+| `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the prompt editor and Models picker are hidden in the UI; the captured image can still be vectorised locally or saved as a bitmap scan, but is never sent to OpenRouter. |
 | `-openrouter-management-key` | (unset) | OpenRouter management key used to query the account balance. Optional; without it the UI shows only the session's spend. Cannot be used to process images. |
-| `-output-dir` | `processed` | Folder where processed images are stored. |
+| `-output-dir` | `magooify` | Folder where processed images are stored. |
 | `-model` | `google/gemini-3.1-flash-lite-image` | OpenRouter model used to process the images (any image-capable model). |
 | `-prompt-file` | (unset) | Path to a file whose text is sent to the model with each image, instead of the embedded `PROMPT.md`. |
 | `-port` | `8080` | Port for the local server. |
@@ -51,7 +51,7 @@ The **Models** button in the top bar opens a searchable list of the OpenRouter m
 
 Tick the **Convert result to SVG** box above the Process button and the processed image is traced into a resolution-independent SVG document before being saved, so it can be scaled to any size without pixelation or saved for use in vector drawing tools. The trace is done entirely inside the executable by an embedded vectoriser (in `main.go`) using only the Go standard library: the artwork is split into colour layers matching the bitmap version, each layer's pixels are followed around their boundaries, genuine corners are detected, and each stretch of boundary is fitted with smooth cubic bezier curves. Up to 16 colours are kept as their own layers (each filled with the average colour of its pixels), every other colour is merged into the nearest one, and each layer is emitted as a group with the even-odd fill rule so holes and enclosed shapes trace correctly. Images the model already returns as SVG (some models can be asked directly for vector output) are saved as-is. If the model's output is a format the tracer cannot decode, the request is rejected with a clear error rather than silently saved untraced.
 
-When no OpenRouter API key is configured the **Convert result to SVG** option is the only meaningful step, so the UI locks it on and the Process button is relabelled **Vectorise**. The captured image is never sent off the machine in this mode - every Process request is served by the local vectoriser (and optional palette) without contacting OpenRouter.
+When no OpenRouter API key is configured the UI hides the AI-only controls (prompt editor, Models picker, credit balance) but the **Convert result to SVG** switch stays interactive, so every captured image can be either saved as a bitmap scan or traced into an SVG locally. The captured image is never sent off the machine in this mode - both code paths run entirely inside the executable without contacting OpenRouter.
 
 ## Server
 

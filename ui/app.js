@@ -56,11 +56,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // openrouterConfigured mirrors the openrouter_configured field reported by
   // /api/v1/info: when false the UI hides AI-only controls (the prompt editor
-  // and the Models picker) and forces every Process request to use local
-  // vectorisation, so the captured image is never sent to OpenRouter. The
-  // default of true keeps the UI fully functional if /api/v1/info is slow or
-  // briefly unreachable; the value is overwritten as soon as the response
-  // arrives.
+  // and the Models picker) so the captured image is never sent to OpenRouter.
+  // The Vectorise switch and the palette selector stay fully interactive so
+  // the app can still be used to trace captured images into SVG, or to scan
+  // bitmap images directly. The default of true keeps the UI fully functional
+  // if /api/v1/info is slow or briefly unreachable; the value is overwritten
+  // as soon as the response arrives.
   let openrouterConfigured = true;
 
   const fileInput = document.getElementById('file-input');
@@ -284,22 +285,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // applyFeatureVisibility shows or hides the AI-only controls - the prompt
-  // editor, the Models picker and the AI processing switch - based on whether
-  // the OpenRouter API key has been configured. When OpenRouter is not
-  // configured, vectorisation is the only meaningful step and the Process
-  // button is relabelled "Vectorise" with the vectorise switch forced on.
+  // editor, the Models picker and the credit balance - based on whether the
+  // OpenRouter API key has been configured. The Vectorise switch stays
+  // interactive in both modes so the user can pick between just scanning the
+  // bitmap and tracing it into an SVG.
   function applyFeatureVisibility() {
     document.querySelectorAll('[data-feature="openrouter"]').forEach((el) => {
       el.classList.toggle('d-none', !openrouterConfigured);
     });
-    if (!openrouterConfigured) {
-      vectoriseCheck.checked = true;
-      vectoriseCheck.disabled = true;
-      processLabel.textContent = 'Vectorise';
-    } else {
-      vectoriseCheck.disabled = false;
-      processLabel.textContent = 'Process';
-    }
     refreshPromptPreview();
   }
 
@@ -726,7 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btnProcess.addEventListener('click', async () => {
     if (!currentBlob) return;
     setProcessing(true);
-    processStatus.textContent = openrouterConfigured ? 'Processing...' : 'Vectorising...';
+    processStatus.textContent = processStatusText('start');
     try {
       const sendBlob = await croppedBlob(currentBlob);
       const form = new FormData();
@@ -738,12 +731,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (prompt) form.append('prompt', prompt);
       }
       if (lastOutputFile) form.append('output', lastOutputFile);
-      // Without OpenRouter only vectorisation is available, so the flag is
-      // always set in that mode (the checkbox is locked on in
-      // applyFeatureVisibility).
-      if (openrouterConfigured ? vectoriseCheck.checked : true) {
-        form.append('vectorise', 'true');
-      }
+      if (vectoriseCheck.checked) form.append('vectorise', 'true');
       if (paletteCheck.checked) form.append('palette', paletteSelect.value);
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
       lastOutputFile = data.filename;
@@ -756,7 +744,7 @@ document.addEventListener('DOMContentLoaded', () => {
       resultDownloadLabel.textContent = 'Download ' + data.filename;
       resultDownload.href = 'api/v1/images/' + encodeURIComponent(data.filename);
       resultDownload.setAttribute('download', data.filename);
-      resultModel.textContent = data.model || (openrouterConfigured ? '' : 'Local vectorisation');
+      resultModel.textContent = data.model || resultModelFallback();
       resultTime.textContent = new Date(data.processed_at).toLocaleString();
       resultCard.classList.remove('d-none');
       resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -770,6 +758,28 @@ document.addEventListener('DOMContentLoaded', () => {
       setProcessing(false);
     }
   });
+
+  // processStatusText picks a sensible status line based on whether OpenRouter
+  // is configured and whether the Vectorise switch is on, so the user can see
+  // what's happening to their image (AI processing, local vectorisation or a
+  // plain bitmap scan) without needing to inspect the response.
+  function processStatusText(phase) {
+    if (phase !== 'start') return phase;
+    if (!openrouterConfigured) {
+      return vectoriseCheck.checked ? 'Vectorising...' : 'Saving...';
+    }
+    return vectoriseCheck.checked ? 'Processing & vectorising...' : 'Processing...';
+  }
+
+  // resultModelFallback is shown in the result card in place of a model name
+  // when no AI was involved - either a local vectorisation or a plain
+  // bitmap scan.
+  function resultModelFallback() {
+    if (!openrouterConfigured) {
+      return vectoriseCheck.checked ? 'Local vectorisation' : 'Bitmap scan';
+    }
+    return '';
+  }
 
   btnReset.addEventListener('click', () => {
     currentBlob = null;
