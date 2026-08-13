@@ -98,7 +98,7 @@
         },
         "/api/v1/info": {
             "get": {
-                "description": "Returns system metrics, Go version, OS/Arch, and uptime.",
+                "description": "Returns system metrics, Go version, OS/Arch, uptime, the configured\nmodel, and whether the OpenRouter API key has been configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -272,14 +272,14 @@
         },
         "/api/v1/process": {
             "post": {
-                "description": "Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the processed version of the image in the configured output directory.",
+                "description": "Accepts an image captured by the camera or uploaded by the user. When an OpenRouter\nAPI key is configured the image is sent to the configured vision model for\nprocessing, then stored in the configured output directory. When no key is\nconfigured only the local vectorisation pipeline is available: the request must\ncarry vectorise=true (or a palette id) so the input image is traced into SVG.",
                 "consumes": [
                     "multipart/form-data"
                 ],
                 "produces": [
                     "application/json"
                 ],
-                "summary": "Process an Image with OpenRouter",
+                "summary": "Process an Image",
                 "parameters": [
                     {
                         "type": "file",
@@ -290,7 +290,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "Prompt to send with the image; defaults to the configured prompt",
+                        "description": "Prompt to send with the image; defaults to the configured prompt. Ignored when no OpenRouter key is configured.",
                         "name": "prompt",
                         "in": "formData"
                     },
@@ -595,6 +595,11 @@
                 "mode": {
                     "type": "string",
                     "example": "desktop"
+                },
+                "openrouter_configured": {
+                    "description": "OpenRouterConfigured reports whether the OpenRouter API key has been\nsupplied via -openrouter-key. When false the application can only run\nthe local vectorisation pipeline and the UI hides AI-only controls.",
+                    "type": "boolean",
+                    "example": true
                 },
                 "os": {
                     "type": "string",

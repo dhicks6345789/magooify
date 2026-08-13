@@ -2,17 +2,19 @@
 
 ## Desktop
 
-Simply download and run the executable for your platform from the [project homepage](https://sansay.co.uk/magooify/). To process images you need to supply an OpenRouter API key and the folder where processed images should be stored:
+Simply download and run the executable for your platform from the [project homepage](https://sansay.co.uk/magooify/). To process images with AI you need to supply an OpenRouter API key and the folder where processed images should be stored:
 
 ```
 ./magooify -openrouter-key=sk-or-v1-... -output-dir=~/magooify-images
 ```
 
+Without `-openrouter-key` the application still works as a local vectoriser: the UI hides the prompt editor and the Models picker, and every Process request is served entirely inside the executable (the captured image is traced into an SVG without leaving the machine). The vectorise and palette controls stay available so you can still pick a felt-tip palette for the output, and the `-openrouter-key` flag can be added at any time to enable AI processing.
+
 Optional flags:
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the image endpoint reports that OpenRouter is not configured. |
+| `-openrouter-key` | (unset) | OpenRouter API key used to process captured images. Without it the AI path is disabled in the UI and the image endpoint serves only the local vectorisation pipeline. |
 | `-openrouter-management-key` | (unset) | OpenRouter management key used to query the account balance. Optional; without it the UI shows only the session's spend. Cannot be used to process images. |
 | `-output-dir` | `processed` | Folder where processed images are stored. |
 | `-model` | `google/gemini-3.1-flash-lite-image` | OpenRouter model used to process the images (any image-capable model). |
@@ -48,6 +50,8 @@ The **Models** button in the top bar opens a searchable list of the OpenRouter m
 ### Vectorising Results to SVG
 
 Tick the **Convert result to SVG** box above the Process button and the processed image is traced into a resolution-independent SVG document before being saved, so it can be scaled to any size without pixelation or saved for use in vector drawing tools. The trace is done entirely inside the executable by an embedded vectoriser (in `main.go`) using only the Go standard library: the artwork is split into colour layers matching the bitmap version, each layer's pixels are followed around their boundaries, genuine corners are detected, and each stretch of boundary is fitted with smooth cubic bezier curves. Up to 16 colours are kept as their own layers (each filled with the average colour of its pixels), every other colour is merged into the nearest one, and each layer is emitted as a group with the even-odd fill rule so holes and enclosed shapes trace correctly. Images the model already returns as SVG (some models can be asked directly for vector output) are saved as-is. If the model's output is a format the tracer cannot decode, the request is rejected with a clear error rather than silently saved untraced.
+
+When no OpenRouter API key is configured the **Convert result to SVG** option is the only meaningful step, so the UI locks it on and the Process button is relabelled **Vectorise**. The captured image is never sent off the machine in this mode - every Process request is served by the local vectoriser (and optional palette) without contacting OpenRouter.
 
 ## Server
 

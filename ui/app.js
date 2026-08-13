@@ -54,6 +54,15 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentModelId = null;
   let selectingModel = false;
 
+  // openrouterConfigured mirrors the openrouter_configured field reported by
+  // /api/v1/info: when false the UI hides AI-only controls (the prompt editor
+  // and the Models picker) and forces every Process request to use local
+  // vectorisation, so the captured image is never sent to OpenRouter. The
+  // default of true keeps the UI fully functional if /api/v1/info is slow or
+  // briefly unreachable; the value is overwritten as soon as the response
+  // arrives.
+  let openrouterConfigured = true;
+
   const fileInput = document.getElementById('file-input');
   const previewWrap = document.getElementById('preview-wrap');
   const preview = document.getElementById('preview');
@@ -235,6 +244,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function loadCredits() {
+    // Skip the OpenRouter credits lookup entirely when no key is configured;
+    // there's no session cost to report and no balance to show.
+    if (!openrouterConfigured) {
+      creditInfo.textContent = '';
+      return;
+    }
     fetchJSON('api/v1/credits')
       .then((data) => {
         const parts = ['Session: ' + currencyFmt.format(data.session_cost || 0)];
@@ -262,8 +277,30 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchJSON('api/v1/info')
       .then((data) => {
         currentModelId = data.model || null;
+        openrouterConfigured = data.openrouter_configured === true;
+        applyFeatureVisibility();
       })
       .catch(() => {});
+  }
+
+  // applyFeatureVisibility shows or hides the AI-only controls - the prompt
+  // editor, the Models picker and the AI processing switch - based on whether
+  // the OpenRouter API key has been configured. When OpenRouter is not
+  // configured, vectorisation is the only meaningful step and the Process
+  // button is relabelled "Vectorise" with the vectorise switch forced on.
+  function applyFeatureVisibility() {
+    document.querySelectorAll('[data-feature="openrouter"]').forEach((el) => {
+      el.classList.toggle('d-none', !openrouterConfigured);
+    });
+    if (!openrouterConfigured) {
+      vectoriseCheck.checked = true;
+      vectoriseCheck.disabled = true;
+      processLabel.textContent = 'Vectorise';
+    } else {
+      vectoriseCheck.disabled = false;
+      processLabel.textContent = 'Process';
+    }
+    refreshPromptPreview();
   }
 
   async function loadModels() {
@@ -689,15 +726,24 @@ document.addEventListener('DOMContentLoaded', () => {
   btnProcess.addEventListener('click', async () => {
     if (!currentBlob) return;
     setProcessing(true);
-    processStatus.textContent = 'Processing...';
+    processStatus.textContent = openrouterConfigured ? 'Processing...' : 'Vectorising...';
     try {
       const sendBlob = await croppedBlob(currentBlob);
       const form = new FormData();
       form.append('image', sendBlob, 'capture.jpg');
-      const prompt = promptText.value.trim();
-      if (prompt) form.append('prompt', prompt);
+      // Skip the prompt when OpenRouter isn't configured: there's no model to
+      // send it to and the prompt editor is hidden anyway.
+      if (openrouterConfigured) {
+        const prompt = promptText.value.trim();
+        if (prompt) form.append('prompt', prompt);
+      }
       if (lastOutputFile) form.append('output', lastOutputFile);
-      if (vectoriseCheck.checked) form.append('vectorise', 'true');
+      // Without OpenRouter only vectorisation is available, so the flag is
+      // always set in that mode (the checkbox is locked on in
+      // applyFeatureVisibility).
+      if (openrouterConfigured ? vectoriseCheck.checked : true) {
+        form.append('vectorise', 'true');
+      }
       if (paletteCheck.checked) form.append('palette', paletteSelect.value);
       const data = await fetchJSON('api/v1/process', { method: 'POST', body: form });
       lastOutputFile = data.filename;
@@ -710,12 +756,14 @@ document.addEventListener('DOMContentLoaded', () => {
       resultDownloadLabel.textContent = 'Download ' + data.filename;
       resultDownload.href = 'api/v1/images/' + encodeURIComponent(data.filename);
       resultDownload.setAttribute('download', data.filename);
-      resultModel.textContent = data.model;
+      resultModel.textContent = data.model || (openrouterConfigured ? '' : 'Local vectorisation');
       resultTime.textContent = new Date(data.processed_at).toLocaleString();
       resultCard.classList.remove('d-none');
       resultCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
       processStatus.textContent = 'Done';
-      loadCredits();
+      if (openrouterConfigured) {
+        loadCredits();
+      }
     } catch (err) {
       processStatus.textContent = 'Failed: ' + err.message;
     } finally {

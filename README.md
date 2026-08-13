@@ -6,7 +6,7 @@ Turn your quick, roughly-sketched pen-and-ink black-line style cartoons into cle
 
 - **Image Capture**: Take photos from your device (laptop, desktop, phone or tablet), scan from a [desktop visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser), or simply upload an image.
 - **Image Processing**: Images can (optionally) be processed by AI to smooth lines, create consistent colours and fill shapes. The prompt used for processing is customisable, and the AI model used can be selected, with costs displayed.
-- **Vectorise**: Optionally trace the processed image into a scaleable SVG image.
+- **Vectorise**: Optionally trace any captured image into a scaleable SVG image. This step runs entirely inside the executable and does not require an OpenRouter API key, so the app is still useful as a local vectoriser when AI processing is disabled.
 - **Designed For Schools**: Can integrate with your authentication provider (Google, Microsoft, etc) via an authenticating proxy (Cloudflare Tunnels, Pangolin, etc), cloud storage (Google Drive, OneDrive, etc) and filtered / budget-controlled AI API router, making it suitable for educational establishment looking to manage their pupil's AI tool usage. It can even match the colours of the felt-tip pens, pencils or crayons you use in class!
 - **Self-Hostable**: With a web-based interface and a self-contained, single-executable backend, this application is self-hostable on pretty much any platform, meaning you can control exactly what happens to your user's content.
 - **Easy To Customise**: Built in [Go](https://developers.googleblog.com/why-go-is-an-ideal-language-for-ai-assisted-software-engineering), and designed for development using an AI agent, adding or changing features should be a simple case of describing what you want done.
@@ -27,7 +27,7 @@ Select the "Vectorise" option if you want your output to be an SVG image, scalea
 
 You can use Magooify right away by simply downloading and running the executable for your platform from the project homepage. Simply run the executable, in desktop mode it should open your local web browser and display the user interface.
 
-To use the AI image processing feature, you will need to provide an OpenRouter API key.
+To use the AI image processing feature, you will need to provide an OpenRouter API key. Without one, the app still works as a local vectoriser - the prompt editing option is hidden and the captured image is never sent to OpenRouter, only the local SVG trace runs.
 
 For more details, or if you are a system administrator wanting to run this application centrally for access by multiple users, see the [documentation](docs/running.md).
 

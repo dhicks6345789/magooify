@@ -131,6 +131,10 @@ type SystemInfoResponse struct {
 	OS        string `json:"os" example:"linux"`
 	Arch      string `json:"arch" example:"amd64"`
 	Uptime    string `json:"uptime" example:"12m30s"`
+	// OpenRouterConfigured reports whether the OpenRouter API key has been
+	// supplied via -openrouter-key. When false the application can only run
+	// the local vectorisation pipeline and the UI hides AI-only controls.
+	OpenRouterConfigured bool `json:"openrouter_configured" example:"true"`
 }
 
 // ItemsResponse is the payload returned when listing items.
@@ -363,7 +367,8 @@ func (a *api) user(w http.ResponseWriter, r *http.Request) {
 
 // info returns system information such as mode, Go version, OS/Arch and uptime.
 // @Summary System Info
-// @Description Returns system metrics, Go version, OS/Arch, and uptime.
+// @Description Returns system metrics, Go version, OS/Arch, uptime, the configured
+// @Description model, and whether the OpenRouter API key has been configured.
 // @Produce json
 // @Success 200 {object} SystemInfoResponse
 // @Router /api/v1/info [get]
@@ -374,13 +379,14 @@ func (a *api) info(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"mode":       mode,
-		"go_version": runtime.Version(),
-		"os":         runtime.GOOS,
-		"arch":       runtime.GOARCH,
-		"uptime":     time.Since(a.startTime).Truncate(time.Second).String(),
-		"model":      a.model,
+	json.NewEncoder(w).Encode(map[string]any{
+		"mode":                 mode,
+		"go_version":           runtime.Version(),
+		"os":                   runtime.GOOS,
+		"arch":                 runtime.GOARCH,
+		"uptime":               time.Since(a.startTime).Truncate(time.Second).String(),
+		"model":                a.model,
+		"openrouter_configured": a.openRouterKey != "",
 	})
 }
 
@@ -877,13 +883,20 @@ type imagePayload struct {
 
 // processImage accepts an image (multipart upload or JSON base64/data URL),
 // sends it to an OpenRouter vision model for processing, and stores the image
-// and the resulting description on the file system.
-// @Summary Process an Image with OpenRouter
-// @Description Accepts an image captured by the camera or uploaded by the user, sends it to an OpenRouter vision model for processing, then stores the processed version of the image in the configured output directory.
+// and the resulting description on the file system. When no OpenRouter key
+// has been configured the AI step is skipped and only the local pipeline
+// (vectorising the input image into an SVG) is available; in that mode the
+// request must carry vectorise=true or a palette id so the work is meaningful.
+// @Summary Process an Image
+// @Description Accepts an image captured by the camera or uploaded by the user. When an OpenRouter
+// @Description API key is configured the image is sent to the configured vision model for
+// @Description processing, then stored in the configured output directory. When no key is
+// @Description configured only the local vectorisation pipeline is available: the request must
+// @Description carry vectorise=true (or a palette id) so the input image is traced into SVG.
 // @Accept mpfd
 // @Produce json
 // @Param image formData file true "Image to process"
-// @Param prompt formData string false "Prompt to send with the image; defaults to the configured prompt"
+// @Param prompt formData string false "Prompt to send with the image; defaults to the configured prompt. Ignored when no OpenRouter key is configured."
 // @Param output formData string false "Optional filename to write the processed image to, replacing any existing file with that name"
 // @Param vectorise formData bool false "Trace the processed image into an SVG document (true/1/on/yes)"
 // @Param palette formData string false "Restrict the vectorised SVG to this palette ID (returned by /api/v1/palettes); implies vectorise"
@@ -917,22 +930,42 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	prompt := pl.prompt
-	if strings.TrimSpace(prompt) == "" {
-		prompt = a.processPrompt()
-	}
-	if pl.palette != "" {
-		prompt = applyPalettePrompt(prompt, pl.palette)
-	}
+	var processed []byte
+	var cost float64
+	var model string
 
-	processed, cost, err := a.processWithOpenRouter(pl.img, pl.contentType, prompt)
-	if err != nil {
-		code := http.StatusBadGateway
-		if errors.Is(err, errOpenRouterNotConfigured) {
-			code = http.StatusServiceUnavailable
+	if a.openRouterKey != "" {
+		prompt := pl.prompt
+		if strings.TrimSpace(prompt) == "" {
+			prompt = a.processPrompt()
 		}
-		a.jsonError(w, code, err.Error())
-		return
+		if pl.palette != "" {
+			prompt = applyPalettePrompt(prompt, pl.palette)
+		}
+
+		var perr error
+		processed, cost, perr = a.processWithOpenRouter(pl.img, pl.contentType, prompt)
+		if perr != nil {
+			code := http.StatusBadGateway
+			if errors.Is(perr, errOpenRouterNotConfigured) {
+				code = http.StatusServiceUnavailable
+			}
+			a.jsonError(w, code, perr.Error())
+			return
+		}
+		model = a.model
+	} else {
+		// No OpenRouter key: only the local vectorisation pipeline is available.
+		// Require vectorise or a palette so the request actually does something.
+		if !pl.vectorise && pl.palette == "" {
+			a.jsonError(w, http.StatusServiceUnavailable,
+				"No OpenRouter API key configured; only local vectorisation is available. Restart with -openrouter-key=<key> or enable vectorisation.")
+			return
+		}
+		// Skip the AI step entirely: the input image is the source the
+		// vectoriser traces.
+		processed = pl.img
+		pl.vectorise = true
 	}
 
 	if pl.vectorise {
@@ -965,7 +998,7 @@ func (a *api) processImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ProcessImageResponse{
 		Filename:    imageFile,
-		Model:       a.model,
+		Model:       model,
 		ProcessedAt: time.Now().UTC(),
 		Cost:        cost,
 		SessionCost: sessionCost,

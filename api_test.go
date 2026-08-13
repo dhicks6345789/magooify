@@ -60,6 +60,35 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestInfoEndpointReportsOpenRouterConfigured(t *testing.T) {
+	// Without a key the response reports false so the UI hides AI-only controls.
+	a := newAPI(false, docsFS)
+	req := httptest.NewRequest("GET", "/api/v1/info", nil)
+	rr := httptest.NewRecorder()
+	a.info(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if got, _ := resp["openrouter_configured"].(bool); got {
+		t.Errorf("openrouter_configured = true, want false when no key is set")
+	}
+
+	// With a key the response reports true.
+	a.openRouterKey = "test-key"
+	rr = httptest.NewRecorder()
+	a.info(rr, req)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if got, _ := resp["openrouter_configured"].(bool); !got {
+		t.Errorf("openrouter_configured = false, want true when a key is set")
+	}
+}
+
 func TestUserEndpointDesktop(t *testing.T) {
 	t.Setenv("USER", "tester")
 	a := newAPI(false, docsFS)
@@ -683,13 +712,109 @@ func TestProcessImageNoKey(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse json response: %v", err)
 	}
-	if !strings.Contains(resp.Error, "OpenRouter API key not configured") {
+	if !strings.Contains(resp.Error, "No OpenRouter API key") {
 		t.Errorf("error = %q, want a key-not-configured message", resp.Error)
+	}
+	if !strings.Contains(resp.Error, "vectorisation") {
+		t.Errorf("error = %q, want a vectorisation hint", resp.Error)
 	}
 
 	entries, _ := os.ReadDir(a.outputDir)
 	if len(entries) != 0 {
 		t.Errorf("expected nothing stored when processing fails, found %d files", len(entries))
+	}
+}
+
+func TestProcessImageNoKeyVectorsesLocally(t *testing.T) {
+	// With no OpenRouter key and vectorise=true, the request must be served
+	// locally without any outbound call to OpenRouter.
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	// Use a non-trivial bitmap so the vectoriser produces an SVG document.
+	src := pngOf(4, 4, func(x, y int) bool { return x == y })
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(src)
+	mw.WriteField("vectorise", "true")
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Vectorised {
+		t.Errorf("Vectorised = false, want true when the local vectoriser ran")
+	}
+	if !strings.HasSuffix(resp.Filename, ".svg") {
+		t.Errorf("filename = %q, want a .svg name", resp.Filename)
+	}
+	if resp.Cost != 0 || resp.SessionCost != 0 {
+		t.Errorf("cost = %v / session_cost = %v, want both zero without OpenRouter", resp.Cost, resp.SessionCost)
+	}
+	if resp.Model != "" {
+		t.Errorf("Model = %q, want empty when no OpenRouter call was made", resp.Model)
+	}
+
+	stored, err := os.ReadFile(filepath.Join(a.outputDir, resp.Filename))
+	if err != nil {
+		t.Fatalf("failed to read stored file: %v", err)
+	}
+	if !bytes.Contains(stored, []byte("<svg")) {
+		t.Errorf("stored file is not an SVG document: %s", stored)
+	}
+}
+
+func TestProcessImageNoKeyPaletteImpliesVectorise(t *testing.T) {
+	// Supplying only a palette (no explicit vectorise flag) implicitly
+	// requests vectorisation and must also be served locally.
+	a := newAPI(false, docsFS)
+	a.outputDir = t.TempDir()
+
+	src := pngOfColour(4, 4, func(x, y int) color.RGBA {
+		if x < 2 && y < 2 {
+			return color.RGBA{R: 0xff, A: 0xff}
+		}
+		return color.RGBA{R: 0x50, G: 0xa0, B: 0xff, A: 0xff}
+	})
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("image", "photo.png")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	fw.Write(src)
+	mw.WriteField("palette", "crayola-4")
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/process", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	a.processImage(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var resp ProcessImageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !resp.Vectorised {
+		t.Errorf("Vectorised = false, want true when a palette is set without an AI key")
 	}
 }
 
