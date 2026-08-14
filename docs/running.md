@@ -6,14 +6,54 @@ Magooify is software with a web-based user interface, it runs as a small, self-c
 
 Simply download and run the executable for your platform from the [project homepage](https://www.sansay.co.uk/magooify/). You can run Magooify by simply double-clicking and running the executable you downloaded. You should see the server component running in a terminal window with a few lines of information, and your default web browser should open and show the user interface.
 
-
-To process images with AI you need to supply an OpenRouter API key and the folder where processed images should be stored:
+To be able to process images with AI, you will need to run Magooify from the command-line and supply an OpenRouter API key as a command-line option. Open a terminal / command prompt window (this should work on Windows, MacOS and Linux) and type:
 
 ```
-./magooify -openrouter-key=sk-or-v1-... -output-dir=~/magooify-images
+magooify -openrouter-key=sk-or-v1-..
 ```
 
-Without `-openrouter-key` the UI hides the prompt editor and the Models picker so the captured image is never sent to OpenRouter, but the rest of the controls stay fully interactive. The **Vectorise** switch is the single source of truth for SVG output: when it is on the input image is traced into an SVG locally, and when it is off the bitmap is re-encoded as PNG and saved as-is - perfect for using the app purely as a scanner for paper-based artwork. Selecting a palette restriction only takes effect when AI processing runs (the palette names are folded into the prompt) or when **Vectorise** is on (the local trace is quantised to the palette); otherwise it is silently ignored. Add `-openrouter-key` at any time to bring back the AI processing path.
+Without `-openrouter-key` the application will hide the prompt editor and the "Models" picker so the captured image is never sent to be processed by an AI service, keeping your content entirely on your own system - in this case, it shouldn't even need internet access.
+
+By default, processed images will be placed in a folder called "Magooify" in the same location as the application is run from. You can change this by specifying the output folder with the `-output-dir` option at the command line:
+
+```
+magooify -openrouter-key=sk-or-v1-.. -output-dir=/home/myusername/mypictures
+```
+
+## Server
+
+
+
+You can run Magooify behind an authenticating proxy server - the proxy server handles HTTPS, authenticates the user and passes the username to the application via an HTTP header. As the executable is compiled with CGO disabled (CGO_ENABLED=0) and the proxy server is dealing with HTTPS, the container environment can use the `scratch` (completely empty) container image. For instance, if you were using Pangolin as your authenticating server, you would add a basic Dockerfile:
+
+```
+# Note: the "scratch" image is 0 bytes, it doesn't have tools like chmod, so there's some extra steps
+# needed to get executable files inside a "scratch" image. We need to build a "downloader" image...
+FROM alpine:latest AS downloader
+RUN apk add --no-cache curl && \
+    curl -L https://www.sansay.co.uk/magooify/magooify-linux-amd64 -o /magooify && \
+    chmod +x /magooify
+
+# ...then use that to build the actual image we want.
+FROM scratch
+COPY --from=downloader /magooify /magooify
+```
+And to docker compose, add something like:
+```
+magooify:
+    image: MAGOOIFY_IMAGE
+    command: /magooify -mode=server -port=8080 -base-path=/magooify
+    container_name: magooify
+    restart: unless-stopped
+```
+From the Pangolin control panel you would then create a resource, possibly with a prefix ("magooify" or whatever you have named your derived app) using whatever authentication and access controls you like, that pointed at that container (`magooify:8080`). If you do use a prefix for the resource, be sure to add that prefix as the "-base-path" option when running the server.
+
+
+
+
+
+
+
 
 Optional flags:
 
@@ -60,26 +100,3 @@ When no OpenRouter API key is configured the UI hides the AI-only controls (prom
 
 ## Server
 
-You can run Magooify behind an authenticating proxy server - the proxy server handles HTTPS, authenticates the user and passes the username to the application via an HTTP header. As the executable is compiled with CGO disabled (CGO_ENABLED=0) and the proxy server is dealing with HTTPS, the container environment can use the `scratch` (completely empty) container image. For instance, if you were using Pangolin as your authenticating server, you would add a basic Dockerfile:
-
-```
-# Note: the "scratch" image is 0 bytes, it doesn't have tools like chmod, so there's some extra steps
-# needed to get executable files inside a "scratch" image. We need to build a "downloader" image...
-FROM alpine:latest AS downloader
-RUN apk add --no-cache curl && \
-    curl -L https://www.sansay.co.uk/magooify/magooify-linux-amd64 -o /magooify && \
-    chmod +x /magooify
-
-# ...then use that to build the actual image we want.
-FROM scratch
-COPY --from=downloader /magooify /magooify
-```
-And to docker compose, add something like:
-```
-magooify:
-    image: MAGOOIFY_IMAGE
-    command: /magooify -mode=server -port=8080 -base-path=/magooify
-    container_name: magooify
-    restart: unless-stopped
-```
-From the Pangolin control panel you would then create a resource, possibly with a prefix ("magooify" or whatever you have named your derived app) using whatever authentication and access controls you like, that pointed at that container (`magooify:8080`). If you do use a prefix for the resource, be sure to add that prefix as the "-base-path" option when running the server.
