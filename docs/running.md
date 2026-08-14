@@ -73,19 +73,3 @@ From the Pangolin control panel you would then create a resource, possibly with 
 | `-no-browser` | `false` | Do not auto-launch the browser in desktop mode. |
 
 The environment variables `OPENROUTER_API_KEY`, `OPENROUTER_MANAGEMENT_KEY`, `OUTPUT_DIR`, `OPENROUTER_MODEL`, `PROMPT_FILE`, `PORT`, `APP_MODE`, `HOST` and `BASE_PATH` can be used instead of the equivalent flags.
-
-### Customising the Processing Instructions
-
-The instructions sent to the AI model alongside each image come, by default, from the [`PROMPT.md`](PROMPT.md) file at the repository root. You can use the `-prompt-file` option to override provide your own prompt text.
-
-### Tracking Spend
-
-The application shows the total cost of the current session in the top bar. When you also supply an OpenRouter *management* key with `-openrouter-management-key` (or the `OPENROUTER_MANAGEMENT_KEY` environment variable), the remaining account balance is shown alongside it. Management keys are administrative-only: they can query your credits but cannot process images, so both keys are needed to see the balance. If the management key is missing or the query fails, the balance is simply hidden and only the session cost is shown.
-
-### Choosing a Model
-
-The **Models** button in the top bar opens a searchable, selectable list of the OpenRouter models that can process an image and return a processed image, together with the cost of processing a single image with each one. When OpenRouter publishes an exact per-image price for a model it is used; otherwise the cost is estimated from the model's published per-token rates assuming a typical 1024x1024 image plus a generated image output.
-
-### Vectorising Results to SVG
-
-Select the **Convert result to SVG** option to convert the processed image into a vector SVG document. This process is done by the application itself, so doesn't need access to an AI processing engine for this step, or even internet access.
