@@ -76,26 +76,16 @@ The environment variables `OPENROUTER_API_KEY`, `OPENROUTER_MANAGEMENT_KEY`, `OU
 
 ### Customising the Processing Instructions
 
-The instructions sent to the AI model alongside each image come from the [`PROMPT.md`](PROMPT.md) file at the repository root. The file's text is embedded into the executable at build time, so you can change what the model does with each image simply by editing that file and rebuilding. If `PROMPT.md` is empty or missing the application falls back to a built-in default prompt.
-
-To use a different prompt without rebuilding, point the `-prompt-file` option at your own text file:
-
-```
-./magooify -openrouter-key=sk-or-v1-... -prompt-file=~/my-instructions.txt
-```
-
-The file's text is read from disk on each use; if it can't be read or is empty, the embedded `PROMPT.md` text (or the built-in default) is used instead.
+The instructions sent to the AI model alongside each image come, by default, from the [`PROMPT.md`](PROMPT.md) file at the repository root. You can use the `-prompt-file` option to override provide your own prompt text.
 
 ### Tracking Spend
 
-The UI shows the total cost of the current session (in US dollars, formatted to your locale) in the top bar. When you also supply an OpenRouter *management* key with `-openrouter-management-key` (or the `OPENROUTER_MANAGEMENT_KEY` environment variable), the remaining account balance is shown alongside it. Management keys are administrative-only: they can query your credits but cannot process images, so both keys are needed to see the balance. If the management key is missing or the query fails, the balance is simply hidden and only the session cost is shown.
+The application shows the total cost of the current session in the top bar. When you also supply an OpenRouter *management* key with `-openrouter-management-key` (or the `OPENROUTER_MANAGEMENT_KEY` environment variable), the remaining account balance is shown alongside it. Management keys are administrative-only: they can query your credits but cannot process images, so both keys are needed to see the balance. If the management key is missing or the query fails, the balance is simply hidden and only the session cost is shown.
 
 ### Choosing a Model
 
-The **Models** button in the top bar opens a searchable list of the OpenRouter models that can process an image and return a processed image (fetched live from OpenRouter's `/api/v1/images/models` endpoint, which requires your OpenRouter API key, and cached briefly), together with the cost of processing a single image with each one. Click any row to make that model active immediately; the currently configured model is marked *active*. The images listing covers every image model, including image-to-image models such as the Recraft family that the general models endpoint omits. When OpenRouter publishes an exact per-image price for a model it is used; otherwise the cost is estimated from the model's published per-token rates assuming a typical 1024x1024 image plus a generated image output. Prices change, so treat the figures as guidance and check OpenRouter before committing to a model.
+The **Models** button in the top bar opens a searchable, selectable list of the OpenRouter models that can process an image and return a processed image, together with the cost of processing a single image with each one. When OpenRouter publishes an exact per-image price for a model it is used; otherwise the cost is estimated from the model's published per-token rates assuming a typical 1024x1024 image plus a generated image output.
 
 ### Vectorising Results to SVG
 
-Tick the **Convert result to SVG** box above the Process button and the processed image is traced into a resolution-independent SVG document before being saved, so it can be scaled to any size without pixelation or saved for use in vector drawing tools. The trace is done entirely inside the executable by an embedded vectoriser (in `main.go`) using only the Go standard library: the artwork is split into colour layers matching the bitmap version, each layer's pixels are followed around their boundaries, genuine corners are detected, and each stretch of boundary is fitted with smooth cubic bezier curves. Up to 16 colours are kept as their own layers (each filled with the average colour of its pixels), every other colour is merged into the nearest one, and each layer is emitted as a group with the even-odd fill rule so holes and enclosed shapes trace correctly. Images the model already returns as SVG (some models can be asked directly for vector output) are saved as-is. If the model's output is a format the tracer cannot decode, the request is rejected with a clear error rather than silently saved untraced.
-
-When no OpenRouter API key is configured the UI hides the AI-only controls (prompt editor, Models picker, credit balance) but the **Convert result to SVG** switch stays interactive, so every captured image can be either saved as a bitmap scan or traced into an SVG locally. The captured image is never sent off the machine in this mode - both code paths run entirely inside the executable without contacting OpenRouter.
+Select the **Convert result to SVG** option to convert the processed image into a vector SVG document. This process is done by the application itself, so doesn't need access to an AI processing engine for this step, or even internet access.
