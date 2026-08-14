@@ -19,9 +19,13 @@ You can try a [live demo](https://www.sansay.co.uk/magooify/demo/) right now.
 
 This application is designed to process quick, roughly-sketched pen-and-ink black-line style cartoons into clean, scaleable images with smooth lines and consistent colours. It's a workflow tool designed with beginners in mind, capable of bulk processing images, and can write processed images to a shared cloud storage location - perfect for busy school art classes.
 
+### Draw
+
+Ideally, hand-draw your cartoon on clean, white paper. Use black lines to define shapes and boundaries. If you sketch lines in pencil first you might want to go over in black ink to improve contrast before you scan the image. Colour using felt-tip pen, highlighter pen, colouring pencil or crayon. Fill shapes as well as you can, but you don't need to be an expert - if you are a teacher (or parent), the kind of artwork the average 5-to-10 year old produces is probably what we're aiming for here.
+
 ### Capture (or Upload) Image
 
-The first thing you will see is an option to either take a photo or upload an image. If you are on a phone or tablet you can simply take a photo of the cartoon you want to use. On a laptop or desktop machine, a [desktop USB visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser) is probably your best option.
+The first thing you will see is an option to either take a photo or upload an image. If you are on a phone or tablet you can simply take a photo of your cartoon. On a laptop or desktop machine, a [desktop USB visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser) is probably your best option.
 
 ### Lock Colours
 
