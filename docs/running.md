@@ -1,8 +1,13 @@
 # Running
 
+Magooify is software with a web-based user interface, it runs as a small, self-contained web server that you can point a web browser at. Although it runs as a "server", it doesn't need a huge, dedicated server machine to run on, it will run very happily on most laptops or desktops.
+
 ## Desktop
 
-Simply download and run the executable for your platform from the [project homepage](https://sansay.co.uk/magooify/). To process images with AI you need to supply an OpenRouter API key and the folder where processed images should be stored:
+Simply download and run the executable for your platform from the [project homepage](https://www.sansay.co.uk/magooify/). You can run Magooify by simply double-clicking and running the executable you downloaded. You should see the server component running in a terminal window with a few lines of information, and your default web browser should open and show the user interface.
+
+
+To process images with AI you need to supply an OpenRouter API key and the folder where processed images should be stored:
 
 ```
 ./magooify -openrouter-key=sk-or-v1-... -output-dir=~/magooify-images
