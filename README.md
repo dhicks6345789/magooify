@@ -19,11 +19,25 @@ You can try a [live demo](https://www.sansay.co.uk/magooify/demo/) right now.
 
 This application is designed to process quick, roughly-sketched pen-and-ink black-line style cartoons into clean, scaleable images with smooth lines and consistent colours. It's a workflow tool designed with beginners in mind, capable of bulk processing images, and can write processed images to a shared cloud storage location - perfect for busy school art classes.
 
+### Capture (or Upload) Image
+
 The first thing you will see is an option to either take a photo or upload an image. If you are on a phone or tablet you can simply take a photo of the cartoon you want to use. On a laptop or desktop machine, a [desktop USB visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser) is probably your best option.
 
-Next, select if you want to palette-lock to a known set of colours. A wide range of palettes from pen, pencil and crayon sets used in UK schools are included. The palette is applied when AI processing runs (the model is told which colours to use) or when the **Convert result to SVG** option is on (the local trace is quantised to the palette); with either disabled, the palette choice is silently ignored.
+### Lock Colours
 
-Select the "Vectorise" option if you want your output to be an SVG image, scaleable to fit any size and resolution of media - use your artwork in a book, on a t-shirt or a 96-sheet roadside billboard!
+Next, select if you want to palette-lock to a known set of colours. A wide range of palettes from pen, pencil and crayon sets used in UK schools are included. Any colours in the image, which for a scan or a photo will include subtle shades caused by lighting and natural variation, will be locked to their nearest, single, well-defined colour as given in the pen, pencil or crayon set you choose.
+
+### Tracking AI Spend
+
+The application shows the total cost of the current session in the top bar. When you also supply an OpenRouter *management* key with `-openrouter-management-key` (or the `OPENROUTER_MANAGEMENT_KEY` environment variable), the remaining account balance is shown alongside it. Management keys are administrative-only: they can query your credits but cannot process images, so both keys are needed to see the balance. If the management key is missing or the query fails, the balance is simply hidden and only the session cost is shown.
+
+### Choosing a Model
+
+The **Models** button in the top bar opens a searchable, selectable list of the OpenRouter models that can process an image and return a processed image, together with the cost of processing a single image with each one. When OpenRouter publishes an exact per-image price for a model it is used; otherwise the cost is estimated from the model's published per-token rates assuming a typical 1024x1024 image plus a generated image output.
+
+### Vectorising Results to SVG
+
+Select the "Vectorise" option if you want your output to be an SVG image, scaleable to fit any size and resolution of media - use your artwork in a book, on a t-shirt or a 96-sheet roadside billboard! This process is done by the application itself, so doesn't need access to an AI processing engine (or even internet access) for this step.
 
 ## Running
 
