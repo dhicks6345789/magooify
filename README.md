@@ -25,7 +25,7 @@ Ideally, hand-draw your cartoon on clean, white paper. Use black lines to define
 
 ### Capture (or Upload) Image
 
-The first thing you will see is an option to either take a photo or upload an image. If you are on a phone or tablet you can simply take a photo of your cartoon. On a laptop or desktop machine, a [desktop USB visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser) is probably your best option.
+At thge top of the app's page is an option to either take a photo or upload an image. If you are on a phone or tablet you can simply take a photo of your cartoon. On a laptop or desktop machine, a [desktop USB visualiser](https://www.amazon.co.uk/s?k=desktop+visualiser) is probably your best option. If you have a desktop flatbed scanner, you can upload image files from that.
 
 ### Lock Colours
 
