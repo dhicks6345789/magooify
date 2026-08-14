@@ -20,11 +20,19 @@ By default, processed images will be placed in a folder called "Magooify" in the
 magooify -openrouter-key=sk-or-v1-.. -output-dir=/home/myusername/mypictures
 ```
 
+If you want to use Magooify regularly in desktop mode you should probably create a simple script / batch file to start it up with the OpenRouter key you want to use.
+
+To do: for end-user convenience, package the executable in a Windows / MacOS installer that asks for an optional API key and creates a shortcut to run the application in desktop mode.
+
 ## Server
 
+If you are a system administrator of some kind, wanting multiple of your users able to use Magooify, then it is designed to sit behind an authenticating proxy server such as Cloudflare Tunnels, Pangolin, or similar. Magooify will expect to be passed the authenticated user's username via HTTP header, which should be default behaviour for most such systems.
 
+A common setup with such systems is for applications to be run in their own (Docker, Podman, etc) container. Magooify is written in Go, with the executable compiled with CGO disabled (CGO_ENABLED=0), therefore it should work in a very minimal container image, even the completely empty `scratch` image.
 
-You can run Magooify behind an authenticating proxy server - the proxy server handles HTTPS, authenticates the user and passes the username to the application via an HTTP header. As the executable is compiled with CGO disabled (CGO_ENABLED=0) and the proxy server is dealing with HTTPS, the container environment can use the `scratch` (completely empty) container image. For instance, if you were using Pangolin as your authenticating server, you would add a basic Dockerfile:
+In testing and development, Magooify ran on a basic virtual machine on a shared cloud provider with 2GB of RAM and 80GB of disk space - and that's including the whole desktop Linux development environment, an instance of Pangolin and the OpenCode development tool.
+
+For instance, if you were using Pangolin as your authenticating server, you would add a basic Dockerfile:
 
 ```
 # Note: the "scratch" image is 0 bytes, it doesn't have tools like chmod, so there's some extra steps
@@ -46,16 +54,10 @@ magooify:
     container_name: magooify
     restart: unless-stopped
 ```
+
 From the Pangolin control panel you would then create a resource, possibly with a prefix ("magooify" or whatever you have named your derived app) using whatever authentication and access controls you like, that pointed at that container (`magooify:8080`). If you do use a prefix for the resource, be sure to add that prefix as the "-base-path" option when running the server.
 
-
-
-
-
-
-
-
-Optional flags:
+## Optional flags:
 
 | Flag | Default | Description |
 | --- | --- | --- |
@@ -97,6 +99,3 @@ The **Models** button in the top bar opens a searchable list of the OpenRouter m
 Tick the **Convert result to SVG** box above the Process button and the processed image is traced into a resolution-independent SVG document before being saved, so it can be scaled to any size without pixelation or saved for use in vector drawing tools. The trace is done entirely inside the executable by an embedded vectoriser (in `main.go`) using only the Go standard library: the artwork is split into colour layers matching the bitmap version, each layer's pixels are followed around their boundaries, genuine corners are detected, and each stretch of boundary is fitted with smooth cubic bezier curves. Up to 16 colours are kept as their own layers (each filled with the average colour of its pixels), every other colour is merged into the nearest one, and each layer is emitted as a group with the even-odd fill rule so holes and enclosed shapes trace correctly. Images the model already returns as SVG (some models can be asked directly for vector output) are saved as-is. If the model's output is a format the tracer cannot decode, the request is rejected with a clear error rather than silently saved untraced.
 
 When no OpenRouter API key is configured the UI hides the AI-only controls (prompt editor, Models picker, credit balance) but the **Convert result to SVG** switch stays interactive, so every captured image can be either saved as a bitmap scan or traced into an SVG locally. The captured image is never sent off the machine in this mode - both code paths run entirely inside the executable without contacting OpenRouter.
-
-## Server
-
